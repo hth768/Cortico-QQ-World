@@ -1,0 +1,33 @@
+{
+  "name": "cortico-world-qq-better",
+  "version": "0.1.31",
+  "description": "Cortico World 扩展：QQ（OneBot v11 / NapCat）适配器，移植自 fat-fish qq_bot 运行时，支持反向与正向 WebSocket 双模式，并增量集成了 Cortico 内置能力（发送确认门、控制台、环境提示词、通知、可选视觉识别）。",
+  "type": "module",
+  "main": "./src/index.ts",
+  "files": ["src", "dist", "README.md", "ENV_PROMPT.md"],
+  "license": "MIT",
+  "keywords": ["cortico-world", "qq", "onebot", "napcat"],
+  "cortico": {
+    "kind": "world",
+    "api": 5,
+    "label": "QQ_bot",
+    "consoleClient": "dist/console.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "build:console": "node scripts/build-console.mjs",
+    "test": "node --test tests/normalize.test.ts tests/config.test.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}
