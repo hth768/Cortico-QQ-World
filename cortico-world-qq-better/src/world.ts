@@ -94,6 +94,8 @@ export class QQWorld implements World {
   private proactivePersonaCache: string | null = null;
   /** sendTo 因限速/防死循环而拦截时返回的字符串前缀，便于 qq_send 工具区分“已发送”与“被拦截”。 */
   private static readonly SEND_BLOCKED = '[send blocked] ';
+  /** sendTo 因 NapCat 断连/图片获取失败等导致部分或全部段发送失败时返回的字符串前缀。 */
+  private static readonly SEND_FAILED = '[send failed] ';
   /** 群聊发言频率限制：group:<id> -> 已发出消息的时间戳数组（用于滑动窗口计数）。 */
   private groupSpeakStamps = new Map<string, number[]>();
   /** 防死循环：会话地址 -> 自上次对方发言以来的 bot 连续发送条数。 */
@@ -1474,6 +1476,10 @@ export class QQWorld implements World {
       this.dedupSends.set(address, { norm, ts: Date.now() });
     }
     const tail = ids.length ? `（message_id: ${ids.join(', ')}，可用 #编号 引用回复）` : '';
+    if (ok < total) {
+      // 部分/全部失败：返回明确失败标记，便于 qq_send 识别并真实地报告“未发送”（而非误报“已发送”）。
+      return QQWorld.SEND_FAILED + `已向 ${this.convLabel(address)} 发送 ${ok}/${total} 段（有 ${total - ok} 段发送失败，可能因 NapCat 断连或图片获取失败）。${tail}`;
+    }
     return `已向 ${this.convLabel(address)} 发送 ${ok}/${total} 段。${tail}`;
   }
 
@@ -1538,7 +1544,20 @@ export class QQWorld implements World {
         const id = `d${Math.random().toString(36).slice(2, 8)}`;
         this.pendingSends.set(id, { address, label: this.convLabel(address), text, createdAt: Date.now(), replyMessageId: rid, sent: false });
         // 直接发送（去掉强制草稿门：LLM 起草后常常不调 qq_confirm_send，导致消息发不出去）
-        const res = await this.sendTo(address, text, rid, atQQs);
+        let res = await this.sendTo(address, text, rid, atQQs);
+        // 若因 NapCat 断连/图片失败导致发送失败，等待重连后重试一次（最多约 5s）。
+        if (res.startsWith(QQWorld.SEND_FAILED) && this.driver && !(this.driver as unknown as { connected?: boolean }).connected) {
+          this.log.warn('qq_send 发送失败且 NapCat 未连，等待重连后重试', { address });
+          let waited = 0;
+          while (waited < 5000) {
+            await sleep(500);
+            waited += 500;
+            if ((this.driver as unknown as { connected?: boolean }).connected) break;
+          }
+          if ((this.driver as unknown as { connected?: boolean }).connected) {
+            res = await this.sendTo(address, text, rid, atQQs);
+          }
+        }
         const entry = this.pendingSends.get(id);
         if (entry) entry.sent = true;
         // 暂停期间已到达的外部事件先排到下一轮
@@ -1550,6 +1569,13 @@ export class QQWorld implements World {
         }
         if (res.startsWith(QQWorld.SEND_BLOCKED)) {
           return `未能发送（编号 ${id}）到 ${this.convLabel(address)}：${res.slice(QQWorld.SEND_BLOCKED.length)}\n${rid !== undefined ? `（引用回复 #${rid} 未发出）\n` : ''}`;
+        }
+        if (res.startsWith(QQWorld.SEND_FAILED)) {
+          // 如实报告“未发送”，不让模型/用户误以为已发出；failed:true 让模型知道可重试。
+          return {
+            text: `未能发送（编号 ${id}）到 ${this.convLabel(address)}：${res.slice(QQWorld.SEND_FAILED.length)}\n（QQ 上没有收到这条消息，NapCat 可能断连或图片获取失败，稍后可重试）`,
+            failed: true,
+          };
         }
         return `已发送（编号 ${id}）到 ${this.convLabel(address)}：${res}\n${rid !== undefined ? `（已绑定引用回复 #${rid}）\n` : ''}`;
       },

@@ -184,6 +184,12 @@ export class OneBotDriver {
     }
   }
 
+  /** 是否已连接到 NapCat（active 套接字处于 OPEN 状态）。供上层在发送前/失败重试时判断。 */
+  get connected(): boolean {
+    const s = this.active;
+    return !!s && s.readyState === WebSocket.OPEN;
+  }
+
   /** 调用 OneBot API，回包按 echo 关联。 */
   callApi<T = unknown>(action: string, params: Record<string, unknown> = {}): Promise<T> {
     const socket = this.active;
