@@ -924,18 +924,19 @@ export class QQWorld implements World {
           if (bytes) blobs.push({ bytes, mime: 'image/jpeg', name: 'qq-image', fallbackText: '[图片]' });
         }
         if (this.config.vision.enabled && !this.host?.isPaused?.()) {
-          void this.vision.register(url, Date.now() + 60_000)?.then((desc) => {
-            if (desc && this.host) {
-              void this.host.pushEvent({
-                type: 'qq.image',
-                ts: eventTs(this.config.timezone),
-                source: SOURCE,
-                text: `图片内容（${conv.label}）：${desc}`,
-                senderKey: `${conv.address}:vision`,
-                meta: { conv: conv.address },
-              });
+          try {
+            const descP = Promise.resolve(this.vision.register(url, Date.now() + 60_000));
+            const desc = await Promise.race([
+              descP,
+              new Promise<string | null>((res) => setTimeout(() => res(null), 2_500)),
+            ]);
+            if (desc) {
+              if (text) text += '\n';
+              text += `[图片内容（${conv.label}）]：${desc}`;
             }
-          });
+          } catch (e) {
+            this.log.warn('图片视觉描述失败 ' + String(e));
+          }
         }
         // 图片作为表情包收藏：该图片本身就得是表情（NapCat 推来的表情包常是 image 段，
         // 但 subType 往往为 null，仅靠 subType 会漏采；故同时认 summary 里的表情标记）。
@@ -1447,6 +1448,7 @@ export class QQWorld implements World {
       name: 'qq_send',
       tags: ['speak'],
       barrierAfter: true,
+      endsTurn: true,
       description:
         '回复 QQ 消息事件的唯一渠道：发送一条发往 QQ 群或私聊的消息（不要用 terminal_send，那只会发到控制台终端）。调用即直接发送，无需再确认。to 直接填事件 meta 里的 conv 字段：群聊为 "group:<群号>"，私聊为 "private:<QQ号>"。',
       parameters: {
