@@ -105,6 +105,14 @@ export class QQWorld implements World {
   private emojiDirAbs = '';
   /** 本进程已处理过的 message_id（去重，防止 NapCat 重投导致同一消息回两遍）。仅内存。 */
   private readonly processedIds = new Set<string>();
+  /**
+   * 兜底自动回复状态。当一条“应当回复”的入站消息（私聊 / 被 @ 的群消息）触发了本轮，
+   * 而模型最终没有调用 qq_send 就把文本当成了回复（纯文字回答 → 控制台有、QQ 收不到），
+   * 我们在回合收束时把模型生成的文本自动发往来源会话，避免漏发。
+   */
+  private readonly _pendingReplyConvs = new Set<string>();
+  private _tapBuf = '';
+  private readonly _sentThisTurn = new Set<string>();
   /** 群成员昵称→QQ 缓存（懒加载，供按昵称 @人/戳人）。groupId -> (小写名->qq)。 */
   private readonly memberIndex = new Map<number, Map<string, number>>();
   private stickerDirAbs = '';
@@ -1040,6 +1048,8 @@ export class QQWorld implements World {
       }
     }
     this.log.info('HANDLE_PUSH pre kind=' + conv.kind);
+    // 记录“应当回复”的会话，供回合收束时兜底自动发送（模型若只输出文本未调 qq_send）。
+    if (conv.kind === 'private' || atMe) this._pendingReplyConvs.add(conv.address);
     try {
       await host.pushEvent({
         type: 'qq.message',
@@ -1073,6 +1083,7 @@ export class QQWorld implements World {
         clearTimeout(conv.aggregationTimer);
         conv.aggregationTimer = undefined;
       }
+      this._pendingReplyConvs.add(conv.address);
       void host.pushEvent({
         type: 'qq.message',
         ts: eventTs(this.config.timezone, new Date(pend.firstAt)),
@@ -1091,6 +1102,7 @@ export class QQWorld implements World {
       const p = conv.pendingAggregatedText;
       if (!p) return;
       conv.pendingAggregatedText = undefined;
+      this._pendingReplyConvs.add(conv.address);
       void this.host.pushEvent({
         type: 'qq.message',
         ts: eventTs(this.config.timezone, new Date(p.firstAt)),
@@ -1101,6 +1113,43 @@ export class QQWorld implements World {
         blobs: undefined,
       });
     }, win);
+  }
+
+  /**
+   * 输出流接收器：实时累积模型本轮的“正文”文本（仅 output_text.delta，不含思考链/拒答）。
+   * 用于回合收束时兜底把模型文本自动发往应回复的会话。
+   */
+  outputTap() {
+    return {
+      onEvent: (event: any): void => {
+        if (event && event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+          this._tapBuf += event.delta;
+        }
+      },
+      onRoundEnd: (): void => {},
+      onAbort: (): void => { this._tapBuf = ''; },
+    };
+  }
+
+  /**
+   * 回合收束钩子（框架在每轮结束都调用，含“模型只输出文本未调工具”的路径）。
+   * 若本轮由“应回复”的入站消息触发、且模型没有对该会话调用 qq_send，
+   * 则把模型生成的文本自动发往来源会话，避免“控制台有回复、QQ 收不到”。
+   */
+  onTurnEnded(): void {
+    const buf = this._tapBuf.trim();
+    const pending = [...this._pendingReplyConvs];
+    // 仅当“单一待回复会话且本轮未对其发送、且有文本”时兜底，避免多消息歧义或串轮误发。
+    if (pending.length === 1) {
+      const conv = pending[0];
+      if (!this._sentThisTurn.has(conv) && buf) {
+        this.log.warn('兜底自动发送：入站消息未调 qq_send，按模型文本回复', { conv, len: buf.length });
+        void this.sendTo(conv, buf).catch((e) => this.log.warn('兜底自动发送失败', { err: String(e) }));
+      }
+    }
+    this._tapBuf = '';
+    this._sentThisTurn.clear();
+    this._pendingReplyConvs.clear();
   }
 
   /** 实时拉取被引用消息（对齐 fat-fish get_quoted_message 的 get_msg 路径）。 */
@@ -1469,6 +1518,7 @@ export class QQWorld implements World {
         const target = this.resolveTarget(to);
         if (!target) return 'to 格式应为 "group:<群号>" 或 "private:<QQ号>"（直接复制事件 meta 里的 conv 字段，不要自己改）。';
         const address = `${target.kind}:${target.id}`;
+        this._sentThisTurn.add(address); // 标记本轮已对该会话发送，兜底逻辑据此跳过重复发送
         if (!this.isListened(target.kind, target.id)) {
           return `该${target.kind === 'group' ? '群' : '私聊'}不在监听名单内，无法发送。请先用控制台加入监听。`;
         }
