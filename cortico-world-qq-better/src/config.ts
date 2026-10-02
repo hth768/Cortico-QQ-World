@@ -180,12 +180,70 @@ export interface QQWorldConfig {
     voiceTranscribeTimeout: number;
     /** ffmpeg 可执行文件路径（用于把 SILK/AMR 解码成 WAV）。空=依次找 PATH 与仓库 node_modules/ffmpeg-static。 */
     voiceFfmpegPath: string;
+    /** VoxCPM 本地 TTS 服务基址（provider 选 voxcpm 时必填），如 http://127.0.0.1:8765。 */
+    voxcpmUrl: string;
+    /** VoxCPM 音色描述（自然语言），如「可爱傲娇少女音」。 */
+    voxcpmVoiceDesc: string;
+    /** VoxCPM 语速（0.5~2），默认 1.0。 */
+    voxcpmSpeed: number;
+    /** VoxCPM 推理步数（越小越快越夸张），默认 10。 */
+    voxcpmTimesteps: number;
+    /** VoxCPM 随机种子（0=随机，>0 固定可复现）。 */
+    voxcpmSeed: number;
   };
+  /** 群管理员能力：群撤回 / @全体成员 / 发群通知 / 审核进群 / 给予群头衔 / 禁言（及全员禁言）。
+   *  需要 bot 账号是对应群的管理员或群主，否则 QQ 会拒绝操作。qq_admin_* 工具始终注册，此开关决定是否生效。 */
+  admin: {
+    /** 是否启用群管理员能力。关闭则所有 qq_admin_* 工具返回“功能未开启”，不执行任何操作。 */
+    enabled: boolean;
+    /** 发群通知（公告）使用的 OneBot action 名。不同 NapCat 版本可能为 send_group_notice 或 _send_group_notice。 */
+    noticeAction: string;
+    /**
+     * 授权指挥官白名单：允许通过对话命令 bot 执行管理员操作的 QQ 号数组。
+     * 在名单内的人，无论群内身份，都能命令 bot 撤消息/禁言等。空数组表示不单独授权任何人。
+     */
+    allowlist: string[];
+    /**
+     * 是否允许群内管理员/群主通过对话命令 bot 执行管理员操作。
+     * 默认 true：群管/群主在群里发话即可指挥 bot。设为 false 则只有 allowlist 里的人能指挥。
+     */
+    allowGroupAdmins: boolean;
+    /**
+     * 仅群主可指挥：为 true 时，即便 allowGroupAdmins 开启，也只有群主（外加 allowlist）能命令 bot，
+     * 普通管理员不行。默认 false（群主+管理员均可）。
+     */
+    ownerOnly: boolean;
+    /**
+     * 保护群主：禁止任何人（含管理员）用 bot 撤回/禁言群主。默认 true。
+     */
+    protectOwner: boolean;
+    /**
+     * 保护管理员：只有群主能用 bot 撤回/禁言另一名管理员。默认 true。
+     */
+    protectAdmins: boolean;
+    /**
+     * 允许 bot 自行处理加群请求（通过/拒绝），而无需某个人在对话里指挥。默认 true。
+     * 设为 false 则 qq_admin_join_approve/reject 返回“未开启自动审核”。
+     */
+    allowJoin: boolean;
+    /**
+     * 允许 AI（bot 自身）主动执行管理操作：当 bot 自行判断需要撤消息/禁言/发公告等时，
+     * 无需某个人下令即可执行。默认 true。设为 false 则仅「授权指挥官」（白名单/群管/群主）能触发，
+     * 普通成员无法让 bot 行动，但 bot 自身也不会在有人刚发言的会话里自主行动。
+     */
+    allowSelf: boolean;
+  };
+  /**
+   * 允许 AI 在群里判断话题涉及隐私/尴尬/敏感时，把回复改为私聊发送给当事人（而非群里公开）。
+   * 开启后，qq_send 对 private:<QQ> 目标跳过私聊监听名单限制，可向任意群成员发起私聊分流。默认 true。
+   */
+  allowPrivateRedirect?: boolean;
 }
 
 
 export const QQ_DEFAULTS: QQWorldConfig = {
   mode: 'reverse',
+  allowPrivateRedirect: true,
   wsUrl: 'ws://127.0.0.1:3001',
   wsHost: '0.0.0.0',
   wsPort: 8080,
@@ -318,6 +376,22 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     voiceTranscribeUrl: '',
     voiceTranscribeTimeout: 60000,
     voiceFfmpegPath: '',
+    voxcpmUrl: 'http://127.0.0.1:8765',
+    voxcpmVoiceDesc: '一个可爱的二次元萌妹，声音娇俏甜美软糯，语速轻快活泼，带点撒娇黏人的语气，像游戏里的吉祥物少女',
+    voxcpmSpeed: 1.0,
+    voxcpmTimesteps: 10,
+    voxcpmSeed: 0,
+  },
+  admin: {
+    enabled: false,
+    noticeAction: 'send_group_notice',
+    allowlist: [],
+    allowGroupAdmins: true,
+    ownerOnly: false,
+    protectOwner: true,
+    protectAdmins: true,
+    allowJoin: true,
+    allowSelf: true,
   },
 };
 
@@ -406,6 +480,15 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
       'worlds.qqbot.routine.greetLazy': { type: 'string', title: '午休播报(兜底)', 'x-hot': true, description: '进入午休段的兜底文案：正常由 LLM 生成，失败才回退。空=无兜底。' },
       'worlds.qqbot.reminder.enabled': { type: 'boolean', title: '到点提醒', 'x-hot': true, description: '开启后，记下的定时提醒会在到点时自动发到对应会话；记录/查询/取消不受此开关影响（始终可用）。' },
   'worlds.qqbot.affinity.enabled': { type: 'boolean', title: '好感度系统', 'x-hot': true, description: '开启后，你对每个用户的好感度（-100~100，可正可负）会随互动增减，并在与该用户对话时自动注入上下文、影响你的态度与分寸。记录/查询/调整工具始终可用。' },
+      'worlds.qqbot.admin.enabled': { type: 'boolean', title: '群管理员能力', 'x-hot': true, description: '开启后可在群里执行管理员操作：群撤回 / @全体成员 / 发群通知 / 审核进群 / 给予群头衔 / 禁言（及全员禁言）。需要 bot 是群管理员或群主，否则 QQ 会拒绝。qq_admin_* 工具始终可用，关闭则提示“功能未开启”。' },
+      'worlds.qqbot.admin.allowlist': { type: 'string', title: '授权指挥官(QQ号,逗号分隔)', 'x-hot': true, description: '白名单：这些 QQ 号的人可在对话里命令 bot 执行管理员操作（撤消息/禁言等），不受群身份限制。多个用逗号分隔，如 123456,654321。留空=不单独授权任何人。' },
+      'worlds.qqbot.admin.allowGroupAdmins': { type: 'boolean', title: '允许群管/群主指挥', 'x-hot': true, description: '为 true 时，群里的管理员/群主在对话里发话即可指挥 bot 执行管理操作。设为 false 则只有白名单里的人能指挥。' },
+      'worlds.qqbot.admin.ownerOnly': { type: 'boolean', title: '仅群主可指挥', 'x-hot': true, description: '为 true 时，即便“允许群管指挥”开启，也只有群主（外加白名单）能命令 bot，普通管理员不行。' },
+      'worlds.qqbot.admin.protectOwner': { type: 'boolean', title: '保护群主(禁撤/禁言)', 'x-hot': true, description: '为 true 时，任何人（含管理员）都不能用 bot 撤回/禁言群主。' },
+      'worlds.qqbot.admin.protectAdmins': { type: 'boolean', title: '保护管理员(仅群主可动)', 'x-hot': true, description: '为 true 时，只有群主能用 bot 撤回/禁言另一名管理员。' },
+      'worlds.qqbot.admin.allowJoin': { type: 'boolean', title: 'bot自动审加群', 'x-hot': true, description: '为 true 时 bot 可自行通过/拒绝加群请求（qq_admin_join_* 可用）；为 false 则这两个工具返回“未开启自动审核”。' },
+      'worlds.qqbot.admin.allowSelf': { type: 'boolean', title: 'AI可自主管理', 'x-hot': true, description: '为 true 时，bot（AI 本人）可自行判断并执行管理操作（撤回/禁言/公告等），无需某个人下令。为 false 则仅“授权指挥官”（白名单/群管/群主）能触发，普通成员无法让 bot 行动，但 bot 也不会在有人刚发言的会话里自主管理。群主/管理员始终受 protectOwner/protectAdmins 保护。' },
+      'worlds.qqbot.allowPrivateRedirect': { type: 'boolean', title: '允许私聊分流', 'x-hot': true, description: '为 true 时，群里若话题涉及隐私 / 尴尬 / 敏感，bot 可把回复改为私聊发送给当事人（而非群里公开）：qq_send 对 private:<QQ> 目标会跳过监听名单限制，直接向该群成员私聊。为 false 则只能在群里回复，无法私聊分流。' },
       'worlds.qqbot.selfName': { type: 'string', title: '自称(第一人称)', 'x-hot': true, description: '主动说话调度器与作息状态文本里替代硬编码「本鱼」的自称。留空=从 prompts/ORIENTATION.md 推断（昵称/名字/「你是X」），推断不到回退登录 QQ 昵称、再回退「我」；填了则强制用此值，换人设零改码。' },
   },
   },
@@ -418,12 +501,12 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
   schema: {
   type: 'object',
   title: 'QQ · 语音收发',
-  description: '收语音转文字(ASR)+发语音(TTS)。「实现方式」下拉选择供应商：native=OneBot 原生 translate_record/tts（零依赖，开箱即用）；custom=用「模型网址+API Key」对接远程 OpenAI 兼容音频服务（GLM/OpenAI/自建等）；local=对接本地/自建模型（OpenAI 兼容，免 API Key，慢推理可加超时，支持额外参数做声音克隆/设计，如 VoxCPM2 经 vLLM-Omni）。是否说语音由语义判定决定。改完需重启生效。',
+  description: '收语音转文字(ASR)+发语音(TTS)。「实现方式」下拉选择供应商：native=OneBot 原生 translate_record/tts（零依赖，开箱即用）；custom=用「模型网址+API Key」对接远程 OpenAI 兼容音频服务（GLM/OpenAI/自建等）；local=对接本地/自建模型（OpenAI 兼容，免 API Key，慢推理可加超时，支持额外参数做声音克隆/设计，如 VoxCPM2 经 vLLM-Omni）；voxcpm=对接本地 VoxCPM2 TTS 服务（自有接口，如 Fat-Fish 的 vox_tts_server.py：GET /health + POST /tts 返回 48kHz WAV，免 API Key，音色用自然语言描述）。是否说语音由语义判定决定。改完需重启生效。',
   properties: {
   'worlds.qqbot.voice.enabled': { type: 'boolean', title: '启用语音', 'x-hot': false, description: '总开关：关闭则完全不处理语音（收按原方式、发只文字）。' },
   'worlds.qqbot.voice.provider': {
     type: 'string', title: '实现方式', enum: voiceProviderIds(), 'x-hot': false,
-    description: '语音供应商（实现方式）：下拉项由 voice.ts 注册的供应商动态生成。native=OneBot 原生 translate_record/tts（零依赖）；custom=用配置页填写的模型网址+API Key 对接远程 OpenAI 兼容音频服务；local=本地/自建模型（免 API Key，慢推理可加超时，支持额外参数做声音克隆/设计，如 VoxCPM2 经 vLLM-Omni）。新增供应商只需在 voice.ts 用 registerVoiceProvider 注册。',
+    description: '语音供应商（实现方式）：下拉项由 voice.ts 注册的供应商动态生成。native=OneBot 原生 translate_record/tts（零依赖）；custom=用配置页填写的模型网址+API Key 对接远程 OpenAI 兼容音频服务；local=本地/自建模型（免 API Key，慢推理可加超时，支持额外参数做声音克隆/设计，如 VoxCPM2 经 vLLM-Omni）；voxcpm=本地 VoxCPM2 TTS 服务（自有接口，音色用自然语言描述，免 API Key，收语音回退 native 识别）。新增供应商只需在 voice.ts 用 registerVoiceProvider 注册。',
   },
   'worlds.qqbot.voice.asr': { type: 'boolean', title: '收语音转文字', 'x-hot': false, description: '开启后，用户发语音会被转成文字进入对话（文字更可靠、可检索）。' },
   'worlds.qqbot.voice.tts': { type: 'boolean', title: '发语音', 'x-hot': false, description: '开启后，当语义判定认为应当说语音时，回复发成语音。' },
@@ -441,6 +524,11 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
   'worlds.qqbot.voice.voiceTranscribeUrl': { type: 'string', title: '专用识别服务地址', 'x-hot': false, description: 'alont1 风格 ASR：POST {地址}/asr 收 WAV 字节返回 {text}。配了就优先走此路（ffmpeg 把 SILK/AMR 解码成 WAV 再送识别），比 OpenAI /audio/transcriptions 更稳地处理 QQ 原生 SILK 语音。如 http://127.0.0.1:7798。空=走供应商自带 ASR。' },
   'worlds.qqbot.voice.voiceTranscribeTimeout': { type: 'integer', title: '识别超时(毫秒)', minimum: 1000, maximum: 600000, 'x-hot': false, description: '单次识别（ffmpeg 解码 + /asr 请求）最长等待毫秒数（默认 60000）。超时回退供应商自带 ASR 或文字。' },
   'worlds.qqbot.voice.voiceFfmpegPath': { type: 'string', title: 'ffmpeg 路径', 'x-hot': false, description: '解码语音用的 ffmpeg 可执行文件路径。空=依次找 PATH 与仓库 node_modules/ffmpeg-static（win 用 ffmpeg.exe）；找不到则识别服务不可用。' },
+  'worlds.qqbot.voice.voxcpmUrl': { type: 'string', title: 'VoxCPM 服务地址', 'x-hot': false, description: '选 voxcpm 供应商时必填：本地 VoxCPM2 TTS 服务基址，如 http://127.0.0.1:8765。服务暴露 GET /health（就绪返回 {"ready":true,"state":"ready"}）与 POST /tts（返回 48kHz WAV）。' },
+  'worlds.qqbot.voice.voxcpmVoiceDesc': { type: 'string', title: 'VoxCPM 音色描述', 'x-hot': false, description: 'VoxCPM2 说话人音色（自然语言描述），如「可爱傲娇少女音」「温柔御姐音」。' },
+  'worlds.qqbot.voice.voxcpmSpeed': { type: 'number', title: 'VoxCPM 语速', minimum: 0.5, maximum: 2, 'x-hot': false, description: 'VoxCPM2 合成语速（0.5~2，默认 1.0）。' },
+  'worlds.qqbot.voice.voxcpmTimesteps': { type: 'integer', title: 'VoxCPM 推理步数', minimum: 1, maximum: 50, 'x-hot': false, description: 'VoxCPM2 推理步数（越小越快越夸张，默认 10）。' },
+  'worlds.qqbot.voice.voxcpmSeed': { type: 'integer', title: 'VoxCPM 随机种子', minimum: 0, maximum: 2147483647, 'x-hot': false, description: 'VoxCPM2 随机种子（0=随机，>0 固定音色/韵律可复现）。' },
   },
   },
   };
@@ -600,6 +688,29 @@ export function normalizeConfig(raw: QQConfigSection): QQWorldConfig {
   if (typeof vc.voiceTranscribeUrl !== 'string') vc.voiceTranscribeUrl = QQ_DEFAULTS.voice.voiceTranscribeUrl;
   if (typeof vc.voiceTranscribeTimeout !== 'number' || !(vc.voiceTranscribeTimeout > 0)) vc.voiceTranscribeTimeout = QQ_DEFAULTS.voice.voiceTranscribeTimeout;
   if (typeof vc.voiceFfmpegPath !== 'string') vc.voiceFfmpegPath = QQ_DEFAULTS.voice.voiceFfmpegPath;
+  if (typeof vc.voxcpmUrl !== 'string' || !vc.voxcpmUrl) vc.voxcpmUrl = QQ_DEFAULTS.voice.voxcpmUrl;
+  if (typeof vc.voxcpmVoiceDesc !== 'string' || !vc.voxcpmVoiceDesc) vc.voxcpmVoiceDesc = QQ_DEFAULTS.voice.voxcpmVoiceDesc;
+  if (typeof vc.voxcpmSpeed !== 'number' || !(vc.voxcpmSpeed > 0)) vc.voxcpmSpeed = QQ_DEFAULTS.voice.voxcpmSpeed;
+  if (typeof vc.voxcpmTimesteps !== 'number' || !(vc.voxcpmTimesteps > 0)) vc.voxcpmTimesteps = QQ_DEFAULTS.voice.voxcpmTimesteps;
+  if (typeof vc.voxcpmSeed !== 'number' || vc.voxcpmSeed < 0) vc.voxcpmSeed = QQ_DEFAULTS.voice.voxcpmSeed;
+  // admin 子对象原地合并：先摊平默认，再被用户配置覆盖（模式同 voice/routine）
+  const adm = c.admin && typeof c.admin === 'object' ? (c.admin as Record<string, unknown>) : {};
+  Object.assign(adm, { ...QQ_DEFAULTS.admin, ...adm });
+  if (typeof adm.enabled !== 'boolean') adm.enabled = false;
+  if (typeof adm.noticeAction !== 'string' || !adm.noticeAction) adm.noticeAction = QQ_DEFAULTS.admin.noticeAction;
+  // allowlist 在控制台里是逗号分隔字符串，运行时统一规整成字符串数组
+  if (typeof adm.allowlist === 'string') {
+    adm.allowlist = adm.allowlist.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  if (!Array.isArray(adm.allowlist)) adm.allowlist = [];
+  if (typeof adm.allowGroupAdmins !== 'boolean') adm.allowGroupAdmins = true;
+  if (typeof adm.ownerOnly !== 'boolean') adm.ownerOnly = false;
+  if (typeof adm.protectOwner !== 'boolean') adm.protectOwner = true;
+  if (typeof adm.protectAdmins !== 'boolean') adm.protectAdmins = true;
+  if (typeof adm.allowJoin !== 'boolean') adm.allowJoin = true;
+  if (typeof adm.allowSelf !== 'boolean') adm.allowSelf = true;
+  c.admin = adm as QQWorldConfig['admin'];
+  if (typeof c.allowPrivateRedirect !== 'boolean') c.allowPrivateRedirect = true;
   return c;
 }
 

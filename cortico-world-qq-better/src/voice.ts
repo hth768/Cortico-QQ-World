@@ -54,6 +54,16 @@ export interface RuntimeVoiceCfg {
   transcribeTimeout: number;
   /** ffmpeg 候选路径（按 配置 → PATH → 仓库 ffmpeg-static 顺序尝试），用于把 SILK/AMR 解码成 WAV。 */
   ffmpegCandidates: string[];
+  /** VoxCPM 本地 TTS 服务基址（provider 选 voxcpm 时必填），如 http://127.0.0.1:8765。 */
+  voxcpmUrl: string;
+  /** VoxCPM 音色描述（自然语言），如「可爱傲娇少女音」。 */
+  voxcpmVoiceDesc: string;
+  /** VoxCPM 语速（0.5~2），默认 1.0。 */
+  voxcpmSpeed: number;
+  /** VoxCPM 推理步数（越小越快越夸张），默认 10。 */
+  voxcpmTimesteps: number;
+  /** VoxCPM 随机种子（0=随机，>0 固定可复现）。 */
+  voxcpmSeed: number;
 }
 
 /** 一段 record 语音（合成后返回，由 world 负责发送）。 */
@@ -240,11 +250,8 @@ async function openAiSynthesize(
     });
     if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
     const audio = Buffer.from(await resp.arrayBuffer());
-    const dir = join(tmpdir(), 'qq-vox');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const f = join(dir, `tts-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
-    writeFileSync(f, audio);
-    return { type: 'record', data: { file: f } };
+    // 以 base64 内嵌，避免依赖 NapCat 读取本机临时目录（本地绝对路径常被拒收导致「API failed」）。
+    return { type: 'record', data: { file: `base64://${audio.toString('base64')}` } };
   } catch (e) {
     log.warn('[voice] TTS 失败', String(e));
     return null;
@@ -296,6 +303,86 @@ const localProvider: VoiceProvider = {
 
 // 注册 local 供应商（配置页可切）。
 registerVoiceProvider(localProvider);
+
+/* ------------------------------------------------------------------ *
+ * 供应商：voxcpm（本地 VoxCPM2 TTS 服务，如 Fat-Fish 的 vox_tts_server.py）
+ *  - 与 OpenAI 不兼容，走自有接口：
+ *      · GET  {url}/health  → {"ready":true,"state":"ready",...}（模型加载完前 ready 为 false）
+ *      · POST {url}/tts     → 请求体 {text, voice_desc?, speed?, inference_timesteps?, seed?}
+ *                            响应为 48kHz WAV 字节（content-type: audio/wav）
+ *  - 仅负责 TTS（本地 VoxCPM2 不含 ASR）：收语音回退到 native 供应商的 translate_record。
+ *  - 适合本机已有一份 VoxCPM2 服务、想要稳定中文音色且不想走 vLLM-Omni 的场景。
+ * ------------------------------------------------------------------ */
+async function voxcpmReady(base: string, timeoutMs: number): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(`${base}/health`, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return false;
+    const j = (await r.json().catch(() => null)) as { ready?: boolean; state?: string } | null;
+    // 侧车契约：就绪时 {"ready": true, "state": "ready", ...}（注意不是 status 字段）。
+    return !!j && (j.ready === true || j.state === 'ready');
+  } catch {
+    return false;
+  }
+}
+
+async function voxcpmSynthesize(ctx: VoiceSynthCtx): Promise<RecordSeg | null> {
+  const { cfg, text, log } = ctx;
+  const base = (cfg.voxcpmUrl || '').trim().replace(/\/+$/, '');
+  if (!base) {
+    log.warn('[voice] voxcpm 供应商未配置「VoxCPM 服务地址(voxcpmUrl)」，回退文字');
+    return null;
+  }
+  // 轻量探活：未就绪（如刚启动还在加载模型）直接回退文字，不阻塞消息。
+  if (!(await voxcpmReady(base, 4000))) {
+    log.warn('[voice] VoxCPM 服务未就绪（/health 非 ready），回退文字');
+    return null;
+  }
+  const payload: Record<string, unknown> = {
+    text,
+    voice_desc: cfg.voxcpmVoiceDesc || '可爱傲娇少女音',
+    speed: cfg.voxcpmSpeed > 0 ? cfg.voxcpmSpeed : 1.0,
+    inference_timesteps: cfg.voxcpmTimesteps > 0 ? cfg.voxcpmTimesteps : 10,
+  };
+  if (cfg.voxcpmSeed > 0) payload.seed = cfg.voxcpmSeed;
+  try {
+    const resp = await fetch(`${base}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(cfg.voiceTimeout),
+    });
+    if (!resp.ok) {
+      // 400=文本空；500=合成出错；503=仍未就绪。均回退文字，不阻塞。
+      log.warn(`[voice] VoxCPM /tts 返回 ${resp.status}，回退文字`);
+      return null;
+    }
+    const audio = Buffer.from(await resp.arrayBuffer());
+    if (!audio.length) { log.warn('[voice] VoxCPM 返回空音频，回退文字'); return null; }
+    // 以 base64 内嵌，避免依赖 NapCat 读取本机临时目录（本地绝对路径常被拒收导致「API failed」）。
+    return { type: 'record', data: { file: `base64://${audio.toString('base64')}` } };
+  } catch (e) {
+    log.warn('[voice] VoxCPM TTS 请求失败，回退文字', String(e));
+    return null;
+  }
+}
+
+const voxcpmProvider: VoiceProvider = {
+  id: 'voxcpm',
+  // 本地 VoxCPM2 服务不含 ASR：收语音回退到 OneBot 原生 translate_record。
+  transcribe: (ctx) => nativeProvider.transcribe(ctx),
+  synthesize: voxcpmSynthesize,
+  checkDeps(cfg: RuntimeVoiceCfg, log: VoiceLog): boolean {
+    if (!cfg.voxcpmUrl || !cfg.voxcpmUrl.trim()) {
+      log.warn('[voice] voxcpm 供应商需配置「VoxCPM 服务地址(voxcpmUrl)」（如 http://127.0.0.1:8765），否则回退文字');
+      return false;
+    }
+    return true;
+  },
+};
+registerVoiceProvider(voxcpmProvider);
 
 /* ------------------------------------------------------------------ *
  * 专用识别服务（alont1 风格 ASR）：ffmpeg 解码 SILK/AMR → WAV，再 POST {url}/asr

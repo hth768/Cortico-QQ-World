@@ -79,8 +79,9 @@ Cortico 的 **QQ（OneBot v11 / NapCat）** World 扩展。以 `fat-fish` 仓库
 | `routine.greetSleep` / `routine.greetWake` / `routine.greetLazy` | 见源码默认值 | 时段切换时的**兜底**文案：正常播报由 LLM 现场生成（每次说法不固定），仅当生成失败才回退到这几句；留空=无兜底直接跳过 |
 | `reminder.enabled` | `true` | **到点提醒**开关。开启后到点自动把提醒发到对应会话；记录/查询/取消不受此开关影响（始终可用）|
 | `affinity.enabled` | `true` | **好感度系统**开关。开启后，与该用户对话时其当前好感度会自动注入上下文、影响态度与分寸；`qq_affinity_*` 工具始终可用 |
+| `admin.enabled` | `false` | **群管理员能力**开关。开启后可在群里执行管理员操作（群撤回 / @全体成员 / 发群通知 / 审核进群 / 给予群头衔 / 禁言 / 全员禁言）。需要 bot 是群管理员或群主，否则 QQ 会拒绝操作；`qq_admin_*` 工具始终可用，关闭时返回「功能未开启」|
 | `voice.enabled` | `false` | **语音（ASR+TTS）**开关 |
-| `voice.provider` | `native` | 语音供应商（实现方式）。可选项由 `src/voice.ts` 注册表动态生成：`native`=OneBot 原生 `translate_record`/`tts`（零依赖、开箱即用）；`custom`=用「网址+API Key」对接远程 OpenAI 兼容音频服务（GLM/OpenAI/自建等）；`local`=本地/自建模型（OpenAI 兼容、免 API Key、慢推理可加超时、支持额外参数做声音克隆/设计，如 VoxCPM2 经 vLLM-Omni）。新增供应商只需在 `voice.ts` 用 `registerVoiceProvider` 注册 |
+| `voice.provider` | `native` | 语音供应商（实现方式）。可选项由 `src/voice.ts` 注册表动态生成：`native`=OneBot 原生 `translate_record`/`tts`（零依赖、开箱即用）；`custom`=用「网址+API Key」对接远程 OpenAI 兼容音频服务（GLM/OpenAI/自建等）；`local`=本地/自建模型（OpenAI 兼容、免 API Key、慢推理可加超时、支持额外参数做声音克隆/设计，如 VoxCPM2 经 vLLM-Omni）；`voxcpm`=本地 VoxCPM2 TTS 服务（自有接口 `GET /health`+`POST /tts`，免 Key、音色用自然语言描述，仅做 TTS、收语音回退 `native` 识别，如 Fat-Fish 的 `vox_tts_server.py`）。新增供应商只需在 `voice.ts` 用 `registerVoiceProvider` 注册 |
 | `voice.asr` | `true` | 开启语音识别（收到语音→转文字） |
 | `voice.tts` | `true` | 开启语音合成（回复时念成语音） |
 | `voice.semanticJudge` | `true` | 是否用 LLM 判断"这条回复要不要念出来"，避免每条都念 |
@@ -99,6 +100,11 @@ Cortico 的 **QQ（OneBot v11 / NapCat）** World 扩展。以 `fat-fish` 仓库
 | `voice.voiceTranscribeUrl` | `""` | **专用识别服务地址（alont1 风格 ASR）**：POST `{地址}/asr` 收 WAV 字节 → `{text}`。非空时**优先**走此路（ffmpeg 把 SILK/AMR 解码成 WAV 再送识别），比 OpenAI `/audio/transcriptions` 更稳地处理 QQ 原生 SILK 语音；空=走供应商自带 ASR |
 | `voice.voiceTranscribeTimeout` | `60000` | 识别超时（毫秒）：单次 ffmpeg 解码 + `/asr` 请求共用，超时回退供应商自带 ASR 或文字（1000~600000） |
 | `voice.voiceFfmpegPath` | `""` | ffmpeg 可执行文件路径（用于把 SILK/AMR 解码成 WAV）。空=依次找 PATH 与仓库 `node_modules/ffmpeg-static`（win 用 `ffmpeg.exe`）；找不到则识别服务不可用 |
+| `voice.voxcpmUrl` | `http://127.0.0.1:8765` | 选 `voxcpm` 供应商时必填：本地 VoxCPM2 TTS 服务基址（如 Fat-Fish 的 `vox_tts_server.py`）。服务暴露 `GET /health`（就绪返回 `{"ready":true,"state":"ready"}`）与 `POST /tts`（返回 48kHz WAV） |
+| `voice.voxcpmVoiceDesc` | `可爱傲娇少女音` | VoxCPM2 说话人音色（自然语言描述） |
+| `voice.voxcpmSpeed` | `1.0` | VoxCPM2 合成语速（0.5~2） |
+| `voice.voxcpmTimesteps` | `10` | VoxCPM2 推理步数（越小越快越夸张，1~50） |
+| `voice.voxcpmSeed` | `0` | VoxCPM2 随机种子（0=随机，>0 固定音色/韵律可复现） |
 
 > 连接类参数（mode/地址/端口/token）改动后需**整机重启**生效；监听名单（groups/privates）同理。群聊限速/防死循环/**主动相似度**/作息/闹钟均为热配置，控制台改完即时生效（`routine.*` / `reminder.*` 也是 `x-hot`）。
 
@@ -163,8 +169,9 @@ Cortico 的 **QQ（OneBot v11 / NapCat）** World 扩展。以 `fat-fish` 仓库
 | `native` | 无 | OneBot 原生 `translate_record` + `tts` | 零依赖、开箱即用；依赖 NapCat 服务端已解码 SILK 等格式 |
 | `custom` | 需要 API Key | OpenAI 兼容 `/audio/transcriptions` + `/audio/speech` | 远程模型服务（OpenAI / GLM / 自建兼容服务），配 `voiceBaseUrl`+`voiceApiKeySecret` |
 | `local` | **免 Key** | OpenAI 兼容 `/audio/transcriptions` + `/audio/speech` | 本地/自建模型（如 VoxCPM2 经 vLLM-Omni）；慢推理靠 `voiceTimeout` 加超时；高级特性靠 `voiceExtraTts`/`voiceExtraAsr` 额外参数透传 |
+| `voxcpm` | **免 Key** | 自有接口 `GET /health` + `POST /tts`（返回 48kHz WAV） | 本机已有一份 **VoxCPM2 TTS 服务**（如 Fat-Fish 的 `vox_tts_server.py`）；音色用自然语言描述、免 Key、快；**仅做 TTS，收语音回退 `native` 识别** |
 
-三档共用同一套 OpenAI 兼容协议：`ASR`=`POST {baseUrl}/audio/transcriptions`（表单 `file`+`model`+额外参数），`TTS`=`POST {baseUrl}/audio/speech`（JSON `model`+`voice`+`input`+额外参数）。
+`native` / `custom` / `local` 三档共用同一套 OpenAI 兼容协议：`ASR`=`POST {baseUrl}/audio/transcriptions`（表单 `file`+`model`+额外参数），`TTS`=`POST {baseUrl}/audio/speech`（JSON `model`+`voice`+`input`+额外参数）。`voxcpm` 走自有协议（见下）。
 
 ### 专用识别服务（alont1 风格 ASR，更稳地处理 QQ 原生 SILK 语音）
 
@@ -198,6 +205,32 @@ vllm serve openbmb/VoxCPM2 --omni --port 8000
    - 指定语言：`{"language":"zh"}`
 
 > 说明：VoxCPM2 主要做 **TTS**，一般不做 ASR。需要本地语音识别时，可另跑一个本地 faster-whisper（同样暴露 OpenAI 兼容 `/audio/transcriptions`，与 TTS 同址即可），或把 ASR 保持 `native`（由 NapCat 服务端解码）。
+
+### 接入本地 VoxCPM2 TTS 服务（voxcpm 供应商）
+
+如果你的本地 VoxCPM2 不是经 vLLM-Omni 暴露，而是**自有一个 TTS 服务**（典型如 Fat-Fish 的 `vox_tts_server.py`，协议： `GET /health` 返回 `{"ready":true,"state":"ready"}` 即就绪、`POST /tts` 收 `{text, voice_desc?, speed?, inference_timesteps?, seed?}` 回 **48kHz WAV 字节**），选 `local` 会因为"不是 OpenAI 兼容"而失败。这时用 **`voxcpm`** 供应商直接对接：
+
+```bash
+# 启动本地 VoxCPM2 TTS 服务（举例：Fat-Fish 的 vox_tts_server.py）
+python vox_tts_server.py --host 127.0.0.1 --port 8765
+# 健康检查：curl http://127.0.0.1:8765/health  → {"ready":true,"state":"ready",...}
+# 合成：     POST http://127.0.0.1:8765/tts {"text":"你好","voice_desc":"可爱傲娇少女音"}
+```
+
+然后在语音配置组里：
+
+1. **实现方式**选 `voxcpm`
+2. **VoxCPM 服务地址**填 `http://127.0.0.1:8765`（默认即此，与服务 `--host/--port` 对应）
+3. **VoxCPM 音色描述**填说话人音色（自然语言），如 `可爱傲娇少女音`
+4. **VoxCPM 语速**（0.5~2，默认 1.0）、**VoxCPM 推理步数**（默认 10，越小越快越夸张）、**VoxCPM 随机种子**（0=随机，>0 固定可复现）按需调
+5. **无需 API Key**（本地服务免 Key）
+
+行为要点：
+
+- **TTS**：语义判定认为该念语音时，把文本 `POST /tts` 拿到 WAV，作为 `record` 语音段发出；若服务未就绪（`/health` 返回 `{ready:false}` 或 `state` 非 `ready`，例如刚启动还在加载模型）或合成失败，自动**回退文字**，不阻塞消息。
+- **ASR（收语音）**：VoxCPM2 服务不含语音识别，`voxcpm` 供应商的收语音**回退到 `native`**（即 NapCat 的 `translate_record`）。如需更稳的本地识别，另配 `voice.voiceTranscribeUrl` 专用识别服务即可，该路径优先于供应商自带 ASR。
+- 与 `local` 区别：`local` 走 OpenAI 兼容 `/audio/speech`（适合 VoxCPM2 经 vLLM-Omni 的场景）；`voxcpm` 走上述自有 `/tts` 接口（适合已有一个独立 TTS 服务的场景）。按你本地实际部署选其一。
+
 
 ### 新增自定义供应商（进阶）
 
@@ -244,6 +277,18 @@ interface VoiceProvider {
   - `qq_note_list`：列出全部笔记，返回编号/条目 id 与内容。
   - `qq_note_get`：按 id 查看某条笔记完整内容。
   - `qq_note_forget`：按 id 删除一条笔记。
+
+- **群管理员能力（admin）**：当 bot 账号是群管理员 / 群主时，可在群里执行后台管理操作。功能总开关 `admin.enabled`（默认关，控制台热开启）。开关仅控制是否真正执行，`qq_admin_*` 工具始终可用（关闭时返回「功能未开启」）。所有操作需要 bot 具备对应管理员权限，否则 QQ 会拒绝（返回具体错误）。
+  - `qq_admin_recall`：撤回一条群消息（`messageId` 为要撤回消息的 `message_id`，仅能撤回近 2 分钟内或自己发的消息）。
+  - `qq_admin_at_all`：在群里 **@全体成员** 并附正文（`text`）。需要群开启允许 @全体成员。
+  - `qq_admin_notice`：发布**群通知 / 群公告**（`content`）。底层 OneBot action 由 `admin.noticeAction` 配置（默认 `send_group_notice`；若你的 NapCat 版本用 `_send_group_notice`，在控制台改 `worlds.qqbot.admin.noticeAction` 即可）。
+  - `qq_admin_join_list`：列出当前**待审核的加群请求**（来自收到的加群申请 / 邀请事件），返回每条的 `flag`、群号、申请人 QQ、留言。
+  - `qq_admin_join_approve`：通过一条加群请求（`flag` 来自 `qq_admin_join_list`）。
+  - `qq_admin_join_reject`：拒绝一条加群请求（`flag` + 可选 `reason`）。
+  - `qq_admin_title`：给成员设置**群专属头衔**（`who` + `title`，`title` 为空则清除）。
+  - `qq_admin_ban`：**禁言**某成员（`who` + `durationSec`，默认 600 秒，0 表示解禁）。
+  - `qq_admin_ban_all`：**全员禁言**开关（`enable` = true 开启、false 关闭）。
+  - 群参数 `group` 支持「群号」或 `group:<群号>`；不填则使用当前会话所在群。成员参数 `who` 支持昵称（自动按群内昵称解析）或 QQ 号。
 
 ## 智能体私人笔记本（notebook）
 

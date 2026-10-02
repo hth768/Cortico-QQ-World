@@ -2,8 +2,8 @@
 
 export type OneBotSegment =
   | { type: 'text'; data: { text: string } }
-  | { type: 'at'; data: { qq: string; name?: string } }
-  | { type: 'face'; data: { id: string } }
+  | { type: 'at'; data: { qq: number | string; name?: string } }
+  | { type: 'face'; data: { id: number | string } }
   | { type: 'image'; data: { file: string; url?: string; summary?: string } }
   | { type: 'record'; data: { file: string; url?: string } }
   | { type: 'video'; data: { file: string; url?: string } }
@@ -78,6 +78,10 @@ export interface Conv {
   members?: Map<number, QQSenderBrief>;
   unread?: { count: number; lastActiveAt: number };
   lastMessageAt?: number;
+  /** 最近一条人类发言里 @ 提及的目标 QQ（不含 bot 自身），供禁言等管理工具兜底。 */
+  lastAtUserId?: number;
+  /** 最近一条人类发言所引用消息的原作者 QQ（优先级高于 lastAtUserId）。 */
+  quotedSenderId?: number;
   pendingAggregatedText?: { text: string; firstAt: number };
   /** 私聊聚合到期冲刷计时器（窗口内未再来消息时，把暂存文本投递给 AI）。 */
   aggregationTimer?: ReturnType<typeof setTimeout>;

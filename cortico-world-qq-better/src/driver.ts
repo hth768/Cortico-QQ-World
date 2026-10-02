@@ -6,6 +6,7 @@ interface PendingCall {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timer: NodeJS.Timeout;
+  action: string;
 }
 
 export interface DriverOptions {
@@ -172,7 +173,8 @@ export class OneBotDriver {
         clearTimeout(pending.timer);
         this.pending.delete(String(msg.echo));
         if (msg.status === 'failed') {
-          pending.reject(new Error(msg.message !== undefined ? String(msg.message) : 'API failed'));
+          const detail = `[OneBot API 失败] action=${pending.action} retcode=${msg.retcode ?? '?'} message=${msg.message !== undefined ? String(msg.message) : '(空)'} data=${JSON.stringify(msg.data ?? null)}`;
+          pending.reject(new Error(detail));
         } else {
           pending.resolve(msg.data);
         }
@@ -203,7 +205,7 @@ export class OneBotDriver {
         this.pending.delete(echo);
         reject(new Error(`API ${action} 超时`));
       }, 30000);
-      this.pending.set(echo, { resolve: resolve as (v: unknown) => void, reject, timer });
+      this.pending.set(echo, { resolve: resolve as (v: unknown) => void, reject, timer, action });
       try {
         socket.send(JSON.stringify(payload));
       } catch (e) {

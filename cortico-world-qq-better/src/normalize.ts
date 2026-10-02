@@ -118,7 +118,7 @@ export function buildOutgoing(text: string, emojiDir = ''): OneBotSegment[] {
         // 目录未配置或文件缺失：丢弃该标记
       } else if (/^表情\s*\d+(?:[:：][^\]]*)?$/.test(inner)) {
         const id = inner.match(/^表情\s*(\d+)/)![1];
-        segments.push({ type: 'face', data: { id } });
+        segments.push({ type: 'face', data: { id: Number(id) } });
       } else {
         const fid = faceIdByName(inner);
         if (fid !== null) segments.push({ type: 'face', data: { id: fid } });

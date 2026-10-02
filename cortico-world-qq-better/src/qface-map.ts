@@ -59,7 +59,7 @@ export const QQ_FACE_IDS: Record<string, number> = {
 };
 
 /** 把中文表情名解析为 face id；不是已知表情名返回 null（调用方当作普通文本）。 */
-export function faceIdByName(name: string): string | null {
+export function faceIdByName(name: string): number | null {
   const id = QQ_FACE_IDS[name];
-  return id === undefined ? null : String(id);
+  return id === undefined ? null : id;
 }
