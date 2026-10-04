@@ -6,6 +6,8 @@ Cortico 的 **QQ（OneBot v11 / NapCat）** World 扩展。以 `fat-fish` 仓库
 - World id：`qqbot`（与内置 `qq` 区分，可并存；如需独占可禁用内置 world）
 - 框架契约：`api: 5`
 
+> ⚠️ **语音电话（call）功能仍不成熟，慎用。** 本扩展的「语音」指两类不同能力：① **语音消息（ASR+TTS）**：收发 QQ 语音消息并转写/合成，相对可用（见下「语音」章）；② **语音电话（call）**：模拟实时通话。`call.mode='simulated'`（语音消息会话模拟通话）相对可用；`call.mode='system'`（真接系统电话 / 实时对讲）为**实验性**，依赖 Windows **CABLE 虚拟声卡手动路由**、`audio_bridge_poc` 桥进程稳定性、ASR/TTS 侧车，问题较多——「AI 没声 / 不接电话」多半是桥崩或路由没设对，而非配置错。**请勿在生产或重要场景依赖 `system` 模式。**
+
 ## 与 fat-fish / 内置 qq 的关系
 
 | 能力 | fat-fish 插件 | 本扩展 | 说明 |
@@ -149,6 +151,21 @@ Cortico 的 **QQ（OneBot v11 / NapCat）** World 扩展。以 `fat-fish` 仓库
 - **控制台**："好感度"状态灯显示已记录人数；徽标显示人数。
 
 > 说明：好感度是 bot 自发的"关系判断"，加不加、加多少由它在对话里自己拿捏（也可用工具显式调整）。开关 `affinity.enabled` 只控制是否自动注入上下文；`qq_affinity_*` 工具始终可用（`x-hot` 实时生效）。
+
+## 语音电话（call，实验性 — 慎用）
+
+> ⚠️ **该功能仍不成熟，请谨慎使用。** 仅 `call.mode='simulated'` 相对可用；`call.mode='system'`（真接系统电话 / 实时对讲）为实验性，依赖较多外部条件。
+
+OneBot / NapCat 无法真正接入运营商电话，本扩展以两种方式「模拟通话」：
+
+- **`simulated`（默认）**：触发词接听 → ASR 转写 → LLM 应答 → 分句流式 TTS → 挂断词 / 超时挂断，全程走 OneBot 语音消息。复用「语音（ASR+TTS）」的供应商，**零额外硬件 / 路由要求，相对可用**。
+- **`system`（实验性，慎用）**：通过 `audio_bridge_poc` 真正捕获对方声音、并把 AI 的 TTS 喂进 **CABLE 虚拟声卡 Input**，由 QQ 当作「麦克风」发出，接近实时对讲。该模式不成熟，原因：
+  1. **音频路由须手动配置**：QQ 的「麦克风」必须手动选成 CABLE Output（Win11 24H2 下无法用程序自动切音频端点），否则「AI 没声 / 对方听不到你」。这是系统限制，不是 bug。
+  2. **桥进程稳定性**：`audio_bridge_poc/call_bridge.py` 常驻桥进程，崩溃后虽有自愈拉起，通话中途仍可能断流。
+  3. **侧车依赖**：识别 / 合成依赖「语音」章的供应商；侧车不可达或超时会导致通话无内容。
+  4. 「AI 没声 / 不接电话」多半是桥崩或路由没选对，排查先看桥进程是否在跑、CABLE 路由是否选对，再谈改配置。
+
+相关配置（`worlds.qqbot.call`）：`mode`（`simulated`/`system`）、`bridgeScript`（桥脚本绝对路径，未配则按扩展目录回溯查找）、`bridgePython`（桥所用 python 解释器，未配则回溯 `venv_vox` 等并兜底 `python`）、`bridgeUrl`（桥服务基址，默认 `http://127.0.0.1:8799`）、`answerWords`（接听词）、`hangupWords`（挂断词）、`timeoutSec`（超时挂断秒数）。
 
 ## 语音（ASR + TTS）
 
@@ -339,3 +356,4 @@ interface VoiceProvider {
 - 回评 action 名（默认 `send_qzone_comment`）按 NapCat 版本不同可能变化，失败请在控制台改 `qzone.commentAction`。
 - `qq_qzone_feeds` 拉取列表为 best-effort，取决于 NapCat 是否实现 `get_qzone_msg_list`；取不到时返回空。
 - 动态文案默认走 OpenRouter `google/gemini-2.5-flash` 生成，需配置对应 API Key；`content` 留空且未配 Key 时退化为简短占位文案。
+- 语音电话（call）`system` 模式为**实验性**：依赖 Windows CABLE 虚拟声卡**手动**路由 + `audio_bridge_poc` 桥进程 + ASR/TTS 侧车，问题较多，**慎用**；`simulated` 模式（语音消息会话模拟）相对可用。详见上文「语音电话（call，实验性）」。
