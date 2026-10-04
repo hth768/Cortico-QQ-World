@@ -1,10 +1,14 @@
 /**
  * QQ 语音收发模块。
  *
- * 语音供应商（ASR 收 / TTS 发）通过「注册表」动态挂载，不写死具体实现：
+ * 语音供应商（仅负责 TTS 发 + 收语音回退）通过「注册表」动态挂载，不写死具体实现：
  *  - 当前内置：native（OneBot 原生 translate_record / tts，零依赖开箱即用）、
- *    custom（远程 OpenAI 兼容音频端点，需 API Key）、
- *    local（本地/自建模型，OpenAI 兼容、免 Key、慢推理可加超时）。
+ *    custom（远程 OpenAI 兼容 TTS 端点，需 API Key）、
+ *    local（本地/自建 TTS 模型，OpenAI 兼容、免 Key、慢推理可加超时）、
+ *    voxcpm（本地 VoxCPM2 TTS 服务）。
+ *  - 注意：ASR（语音识别）已统一到顶层「语音识别（asr）」配置，由侧车 /asr 提供，
+ *    供应商的 transcribe 仅作为 asr.mode=off 时的回退（统一走 native translate_record），
+ *    不再各自维护一套 ASR 配置。
  *  - 新增第三方供应商只要在下方 registerVoiceProvider(...) 注册一个实现对象即可，
  *    收/发入口（transcribeRecord / synthesizeVoice / checkVoiceDeps）无需改动。
  *  语义判定（judgeVoiceWish）决定本次回复是否用语音，是独立的触发开关，不属于供应商。
@@ -38,16 +42,12 @@ export interface RuntimeVoiceCfg {
   voiceApiKey: string;
   /** custom 供应商的音色/声音名（仅当所选模型支持时填写，如 tongtong）。 */
   voiceVoice: string;
-  /** custom 供应商的 ASR 模型名（OpenAI 兼容 /audio/transcriptions 用，缺省 whisper-1）。 */
-  voiceAsrModel: string;
   /** custom 供应商的 TTS 模型名（OpenAI 兼容 /audio/speech 用，缺省 tts-1）。 */
   voiceTtsModel: string;
   /** 语音请求超时（毫秒）：TTS/ASR 单次请求最长等待。本地推理慢可调大，custom 与 local 共用。 */
   voiceTimeout: number;
   /** TTS 额外参数（合并进 /audio/speech 的 JSON body），用于本地模型高级特性（如 VoxCPM2 的 reference_audio / voice_design / language）。 */
   voiceExtraTts: Record<string, unknown>;
-  /** ASR 额外参数（合并进 /audio/transcriptions 表单），如 language=zh。 */
-  voiceExtraAsr: Record<string, unknown>;
   /** 专用识别服务地址（alont1 风格 ASR）：POST {url}/asr 收 WAV 字节 → {text}。非空时优先走此路（ffmpeg 解码 SILK/AMR 后送识别），比 OpenAI /audio/transcriptions 更稳地处理 QQ 原生 SILK 语音。 */
   transcribeUrl: string;
   /** 识别服务单次超时（毫秒）。 */
@@ -102,6 +102,8 @@ export interface VoiceProvider {
   synthesize(ctx: VoiceSynthCtx): Promise<RecordSeg | null>;
   /** 依赖自检：返回该供应商是否可用（可选；缺省视为可用）。 */
   checkDeps?(cfg: RuntimeVoiceCfg, log: VoiceLog): boolean;
+  /** 就绪自检（可选，异步）：返回该供应商当前是否真正可用（如本地服务探活）。缺省回退到 checkDeps。让语音通话的 isCallReady 等逻辑按"当前选中的供应商"判定，而不是写死具体供应商。 */
+  checkReady?(cfg: RuntimeVoiceCfg, log: VoiceLog): Promise<boolean>;
 }
 
 const VOICE_PROVIDERS: Record<string, VoiceProvider> = {};
@@ -159,6 +161,22 @@ const nativeProvider: VoiceProvider = {
 // 注册内置供应商（顺序即默认回退链）。
 registerVoiceProvider(nativeProvider);
 
+/**
+ * 把一段文本按句末标点切成句子，用于语音流式逐句合成/发送。
+ * 以中文 。！？；… 与英文 .!? 及换行切分；过滤空串；整段无标点则整体作为一句。
+ */
+export function splitIntoSentences(text: string): string[] {
+  const norm = (text ?? '').replace(/\r/g, '').replace(/[ \t ]+/g, ' ');
+  const parts = norm.split(/(?<=[。！？!?；;…\n])/);
+  const out: string[] = [];
+  for (const p of parts) {
+    const s = p.trim();
+    if (s) out.push(s);
+  }
+  if (out.length === 0 && norm.trim()) out.push(norm.trim());
+  return out;
+}
+
 /* ------------------------------------------------------------------ *
  * OpenAI 兼容音频端点（custom / local 共用）：
  *  - ASR：POST {baseUrl}/audio/transcriptions（form-data: file + model + 额外参数）
@@ -174,47 +192,6 @@ async function fetchBytes(url: string, timeoutMs: number): Promise<Buffer | null
     if (!res.ok) return null;
     return Buffer.from(await res.arrayBuffer());
   } catch {
-    return null;
-  }
-}
-
-/** OpenAI 兼容 ASR。requireKey=false 时允许免 Key（本地服务）。extra 合并进表单。 */
-async function openAiTranscribe(
-  ctx: VoiceTranscribeCtx,
-  opts: { requireKey: boolean; extra: Record<string, unknown> },
-): Promise<string | null> {
-  const { cfg, seg, log } = ctx;
-  const url = seg?.data?.url;
-  if (!url || !cfg.voiceBaseUrl) {
-    log.warn('[voice] 未配置语音模型网址或无音频 url，回退');
-    return null;
-  }
-  if (opts.requireKey && !cfg.voiceApiKey) {
-    log.warn('[voice] 该供应商需配置「API Key」，回退');
-    return null;
-  }
-  const bytes = await fetchBytes(url, cfg.voiceTimeout);
-  if (!bytes) return null;
-  // 注：QQ 语音多为 SILK 编码；OpenAI 兼容端点一般要 wav/mp3/flac。
-  // 若服务商不支持 SILK，请改用 native 供应商（其服务端已解码）。
-  const form = new FormData();
-  form.append('model', cfg.voiceAsrModel || 'whisper-1');
-  form.append('file', new Blob([bytes]), 'voice');
-  for (const [k, val] of Object.entries(opts.extra)) form.append(k, String(val));
-  const headers: Record<string, string> = {};
-  if (cfg.voiceApiKey) headers.Authorization = `Bearer ${cfg.voiceApiKey}`;
-  try {
-    const resp = await fetch(`${cfg.voiceBaseUrl}/audio/transcriptions`, {
-      method: 'POST',
-      headers,
-      body: form,
-      signal: AbortSignal.timeout(cfg.voiceTimeout),
-    });
-    if (!resp.ok) throw new Error(`ASR HTTP ${resp.status}`);
-    const j = (await resp.json()) as { text?: string };
-    return j.text?.trim() || null;
-  } catch (e) {
-    log.warn('[voice] ASR 失败', String(e));
     return null;
   }
 }
@@ -263,7 +240,8 @@ async function openAiSynthesize(
  * ------------------------------------------------------------------ */
 const customProvider: VoiceProvider = {
   id: 'custom',
-  transcribe: (ctx) => openAiTranscribe(ctx, { requireKey: true, extra: ctx.cfg.voiceExtraAsr }),
+  // ASR 已统一到顶层 asr.* 共享引擎（侧车 /asr）；custom 供应商仅做 TTS。收语音回退到 OneBot 原生 translate_record。
+  transcribe: (ctx) => nativeProvider.transcribe(ctx),
   synthesize: (ctx) => openAiSynthesize(ctx, { requireKey: true, extra: ctx.cfg.voiceExtraTts }),
   checkDeps(cfg: RuntimeVoiceCfg, log: VoiceLog): boolean {
     if (!cfg.voiceBaseUrl || !cfg.voiceApiKey) {
@@ -290,7 +268,8 @@ registerVoiceProvider(customProvider);
  * ------------------------------------------------------------------ */
 const localProvider: VoiceProvider = {
   id: 'local',
-  transcribe: (ctx) => openAiTranscribe(ctx, { requireKey: false, extra: ctx.cfg.voiceExtraAsr }),
+  // ASR 已统一到顶层 asr.* 共享引擎（侧车 /asr）；local 供应商仅做 TTS（免 Key 本地模型）。收语音回退到 OneBot 原生 translate_record。
+  transcribe: (ctx) => nativeProvider.transcribe(ctx),
   synthesize: (ctx) => openAiSynthesize(ctx, { requireKey: false, extra: ctx.cfg.voiceExtraTts }),
   checkDeps(cfg: RuntimeVoiceCfg, log: VoiceLog): boolean {
     if (!cfg.voiceBaseUrl) {
@@ -381,6 +360,11 @@ const voxcpmProvider: VoiceProvider = {
     }
     return true;
   },
+  // 本地服务探活：模型加载完前 /health 的 ready 为 false，须等真正 ready。
+  async checkReady(cfg: RuntimeVoiceCfg, log: VoiceLog): Promise<boolean> {
+    if (!cfg.voxcpmUrl || !cfg.voxcpmUrl.trim()) return false;
+    return voxcpmReady(cfg.voxcpmUrl, 4000);
+  },
 };
 registerVoiceProvider(voxcpmProvider);
 
@@ -443,7 +427,7 @@ async function transcribeViaService(ctx: VoiceTranscribeCtx): Promise<string | n
   if (!url) return null;
   const wav = await decodeToWav(url, cfg.ffmpegCandidates, cfg.transcribeTimeout);
   if (!wav) {
-    if (!ffmpegWarned) log.warn('[voice] 语音解码失败：找不到可用的 ffmpeg（可配置 voiceFfmpegPath），识别服务未调用');
+    if (!ffmpegWarned) log.warn('[voice] 语音解码失败：找不到可用的 ffmpeg（可在顶层「语音识别」配置组配置 asr.ffmpegPath），识别服务未调用');
     return null;
   }
   const ctrl = new AbortController();
@@ -500,6 +484,13 @@ export async function synthesizeVoice(
 export function checkVoiceDeps(cfg: RuntimeVoiceCfg, log: VoiceLog): boolean {
   const p = getVoiceProvider(cfg.provider, log);
   return p.checkDeps ? p.checkDeps(cfg, log) : true;
+}
+
+/** 就绪判定（通用，异步）：优先用供应商自己的 checkReady（如本地服务探活 /health ready），没有则回退 checkDeps。供语音通话 isCallReady 等使用，不写死任何具体供应商。 */
+export function voiceReady(cfg: RuntimeVoiceCfg, log: VoiceLog): Promise<boolean> {
+  const p = getVoiceProvider(cfg.provider, log);
+  if (p.checkReady) return p.checkReady(cfg, log);
+  return Promise.resolve(checkVoiceDeps(cfg, log));
 }
 
 /* ------------------------------------------------------------------ *

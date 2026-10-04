@@ -2,6 +2,9 @@ node_modules/
 __pycache__/
 .env
 *.log
+
+# 本地发布凭证(含 npm token),切勿提交
+.npmrc
 # 仅排除根目录产物;tests/fixtures/ 中的 dist/ 文件需要纳入版本控制。
 /dist/
 
@@ -37,3 +40,9 @@ scratch/
 
 # Corti 运维目录(数据归档+复盘),不入库
 CortiV-DataAnalysis/
+
+# 本地发布/补丁产物，非源码
+*.tar.gz
+*.zip
+INSTALL.txt
+patches/

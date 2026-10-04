@@ -216,7 +216,7 @@ export class OneBotDriver {
     });
   }
 
-  /** 拉取登录身份与群列表，构建 QQIdentity。 */
+  /** 拉取登录身份、群列表与好友列表，构建 QQIdentity。 */
   async refreshIdentity(): Promise<QQIdentity> {
     const login = (await this.callApi<{ user_id: number; nickname: string }>('get_login_info')) ?? {
       user_id: 0,
@@ -225,10 +225,29 @@ export class OneBotDriver {
     const groupsRaw = (await this.callApi<Array<{ group_id: number; group_name: string }>>('get_group_list')) ?? [];
     const groups = new Map<number, string>();
     for (const g of groupsRaw) groups.set(g.group_id, g.group_name);
+    // 好友列表：昵称 + 备注（备注是「她实际会喊的名字」）。取不到时退化为空表，不阻塞启动。
+    const friends = new Map<number, { nickname: string; remark?: string }>();
+    try {
+      const friendsRaw =
+        (await this.callApi<Array<{ user_id: number; nickname?: string; remark?: string }>>('get_friend_list')) ?? [];
+      if (Array.isArray(friendsRaw)) {
+        for (const f of friendsRaw) {
+          const id = Number(f?.user_id);
+          if (!id) continue;
+          friends.set(id, {
+            nickname: String(f.nickname ?? '').trim(),
+            remark: f.remark !== undefined && String(f.remark).trim() ? String(f.remark).trim() : undefined,
+          });
+        }
+      }
+    } catch (e) {
+      this.opts.log.warn('拉取好友列表失败（私聊称呼退化为昵称/QQ 号）', { err: String(e) });
+    }
     return {
       selfId: login.user_id,
       nickname: login.nickname,
       groups,
+      friends,
       knownPeers: new Map(),
       nicknameConflicts: new Set(),
       loadedAt: Date.now(),

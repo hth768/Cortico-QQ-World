@@ -92,6 +92,8 @@ export interface QQIdentity {
   nickname: string;
   /** groupId -> 群名 */
   groups: Map<number, string>;
+  /** 好友列表：QQ 号 -> { 昵称, 备注 }。备注优先用作称呼（私聊里她该喊的名字）。 */
+  friends: Map<number, { nickname: string; remark?: string }>;
   /** userId -> { nickname, card } 供离线名片回退 */
   knownPeers: Map<number, { nickname: string; card?: string }>;
   /** nickname 唯一冲突的 userId 集合 */
