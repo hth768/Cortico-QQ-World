@@ -561,6 +561,13 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
         'x-hot': false,
         description: 'reverse=Cortico 开 WS 服务端等 NapCat 反向连（fat-fish 风格）；forward=Cortico 主动连 NapCat 的 wsUrl。',
       },
+      'worlds.qqbot.timezone': {
+        type: 'string',
+        title: '时区',
+        'x-options': 'qq-timezone',
+        'x-hot': true,
+        description: '注入到提示词「现在时间」与事件时间戳的时区（按 UTC 偏移标注，默认中国 UTC+8）。改完即时生效，无需重启。',
+      },
       'worlds.qqbot.wsUrl': { type: 'string', title: '正向 WS 地址', 'x-hot': false },
       'worlds.qqbot.wsHost': { type: 'string', title: '反向监听地址', 'x-hot': false },
       'worlds.qqbot.wsPort': { type: 'integer', title: '反向监听端口', minimum: 1, maximum: 65535, 'x-hot': false },
@@ -1035,4 +1042,65 @@ export function parseNumberSeq(v: unknown): number[] {
       .filter((n) => Number.isFinite(n));
   }
   return [];
+}
+
+/**
+ * 常见国家/地区时区预设。value 为 IANA 时区名（供 Intl 使用），
+ * flag+country 用于控制台下拉展示。默认中国（UTC+8）。
+ */
+export interface TzPreset {
+  flag: string;
+  country: string;
+  iana: string;
+}
+
+export const TZ_PRESETS: TzPreset[] = [
+  { flag: '🇨🇳', country: '中国', iana: 'Asia/Shanghai' },
+  { flag: '🇭🇰', country: '中国香港', iana: 'Asia/Hong_Kong' },
+  { flag: '🇯🇵', country: '日本', iana: 'Asia/Tokyo' },
+  { flag: '🇰🇷', country: '韩国', iana: 'Asia/Seoul' },
+  { flag: '🇸🇬', country: '新加坡', iana: 'Asia/Singapore' },
+  { flag: '🇮🇳', country: '印度', iana: 'Asia/Kolkata' },
+  { flag: '🇦🇪', country: '阿联酋', iana: 'Asia/Dubai' },
+  { flag: '🇷🇺', country: '俄罗斯', iana: 'Europe/Moscow' },
+  { flag: '🇬🇧', country: '英国', iana: 'Europe/London' },
+  { flag: '🇫🇷', country: '法国', iana: 'Europe/Paris' },
+  { flag: '🇩🇪', country: '德国', iana: 'Europe/Berlin' },
+  { flag: '🇺🇸', country: '美国东部', iana: 'America/New_York' },
+  { flag: '🇺🇸', country: '美国西部', iana: 'America/Los_Angeles' },
+  { flag: '🇧🇷', country: '巴西', iana: 'America/Sao_Paulo' },
+  { flag: '🇦🇺', country: '澳大利亚', iana: 'Australia/Sydney' },
+  { flag: '🇳🇿', country: '新西兰', iana: 'Pacific/Auckland' },
+  { flag: '🌐', country: 'UTC（协调世界时）', iana: 'UTC' },
+];
+
+/** 默认时区：中国 UTC+8（与 QQ_DEFAULTS.timezone 一致）。 */
+export const TZ_DEFAULT_IANA = 'Asia/Shanghai';
+
+/**
+ * 返回某 IANA 时区当前的 UTC 偏移标签，如 "UTC+8" / "UTC+5:30" / "UTC-4"。
+ * 自动反映夏令时；非法时区返回空串。
+ */
+export function tzOffsetLabel(iana: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: iana, timeZoneName: 'shortOffset' })
+      .formatToParts(new Date())
+      .find((p) => p.type === 'timeZoneName');
+    const raw = parts?.value ?? '';
+    // raw 形如 "GMT+8" / "GMT+5:30" / "GMT"；去掉 "GMT" 前缀换成 "UTC"。
+    return raw ? 'UTC' + raw.slice(3) : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 给 x-options 下拉（kind='qq-timezone'）提供「国家 (UTC偏移)」友好选项。
+ * 存储值仍为 IANA 名，供 Intl 直接使用。
+ */
+export function qqTimezoneOptions(): Array<{ value: string; label: string }> {
+  return TZ_PRESETS.map((p) => ({
+    value: p.iana,
+    label: `${p.flag} ${p.country} (${tzOffsetLabel(p.iana)})`,
+  }));
 }
