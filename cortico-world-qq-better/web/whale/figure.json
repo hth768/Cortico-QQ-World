@@ -1,0 +1,339 @@
+{
+  "manifest": 1,
+  "api": 1,
+  "id": "whale",
+  "version": "1.0.0",
+  "name": {
+    "zh": "DeepSeek 大肥鱼",
+    "en": "DeepSeek Whale"
+  },
+  "about": {
+    "zh": "一个 Q 版鲸鱼女仆,二头身,侧身朝右站;蓝色长发、头顶一根呆毛,头两侧各一只鲸鱼鳍,穿女仆裙和围裙,围裙上印着配色对应厂商的标志,身后一条鲸鱼尾巴",
+    "en": "a chibi whale maid, two heads tall, standing three-quarters on facing right; long blue hair with an ahoge, a whale fin on each side of the head, a maid dress and an apron printed with the logo of the colour scheme's vendor, and a whale tail behind her"
+  },
+  "author": "Pal-AI-Lab",
+  "credits": [
+    {
+      "role": "角色原设",
+      "name": "溟月(上善无形)"
+    },
+    {
+      "role": "DeepSeek 女仆二创",
+      "name": "ZipZipPipe"
+    }
+  ],
+  "entry": "figure.js",
+  "export": "createWhaleFigure",
+  "model": "model.json",
+  "thumb": "thumbs/deepseek.png",
+  "axes": [
+    {
+      "id": "scheme",
+      "name": {
+        "zh": "配色",
+        "en": "Colours"
+      },
+      "options": [
+        {
+          "id": "deepseek",
+          "name": {
+            "zh": "DeepSeek"
+          },
+          "thumb": "thumbs/deepseek.png",
+          "accent": "#4D6BFE"
+        },
+        {
+          "id": "harness",
+          "name": {
+            "zh": "DeepSeek Harness"
+          },
+          "thumb": "thumbs/harness.png",
+          "accent": "#555555"
+        },
+        {
+          "id": "chatgpt",
+          "name": {
+            "zh": "ChatGPT"
+          },
+          "thumb": "thumbs/chatgpt.png",
+          "accent": "#303030"
+        },
+        {
+          "id": "claude",
+          "name": {
+            "zh": "Claude"
+          },
+          "thumb": "thumbs/claude.png",
+          "accent": "#D97757"
+        },
+        {
+          "id": "gemini",
+          "name": {
+            "zh": "Gemini"
+          },
+          "thumb": "thumbs/gemini.png",
+          "accent": "#4285F4"
+        },
+        {
+          "id": "qwen",
+          "name": {
+            "zh": "千问"
+          },
+          "thumb": "thumbs/qwen.png",
+          "accent": "#7F69F0"
+        },
+        {
+          "id": "kimi",
+          "name": {
+            "zh": "Kimi"
+          },
+          "thumb": "thumbs/kimi.png",
+          "accent": "#007CFF"
+        },
+        {
+          "id": "minimax",
+          "name": {
+            "zh": "MiniMax"
+          },
+          "thumb": "thumbs/minimax.png",
+          "accent": "#D92D7A"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "id": "deepseek",
+      "pick": {
+        "scheme": "deepseek"
+      },
+      "name": {
+        "zh": "DeepSeek"
+      },
+      "thumb": "thumbs/deepseek.png",
+      "accent": "#4D6BFE",
+      "console": {
+        "light": {
+          "a": "#4562f5",
+          "a2": "#7b90fe",
+          "on": "#ffffff",
+          "t": "#3550d6",
+          "c3": "#8ea0c8",
+          "c4": "#8a8a90"
+        },
+        "dark": {
+          "a": "#7b93ff",
+          "a2": "#a3b3ff",
+          "on": "#0d1640",
+          "t": "#9aabff",
+          "c3": "#8ea0c8",
+          "c4": "#9a9aa0"
+        }
+      }
+    },
+    {
+      "id": "harness",
+      "pick": {
+        "scheme": "harness"
+      },
+      "name": {
+        "zh": "DeepSeek Harness"
+      },
+      "thumb": "thumbs/harness.png",
+      "accent": "#555555",
+      "console": {
+        "light": {
+          "a": "#3f3f44",
+          "a2": "#4d6bfe",
+          "on": "#ffffff",
+          "t": "#2e2e33",
+          "c3": "#7b7b82",
+          "c4": "#a6a6ac"
+        },
+        "dark": {
+          "a": "#d2d2d7",
+          "a2": "#7b93ff",
+          "on": "#151518",
+          "t": "#c8c8cd",
+          "c3": "#8c8c93",
+          "c4": "#64646a"
+        }
+      }
+    },
+    {
+      "id": "chatgpt",
+      "pick": {
+        "scheme": "chatgpt"
+      },
+      "name": {
+        "zh": "ChatGPT"
+      },
+      "thumb": "thumbs/chatgpt.png",
+      "accent": "#303030",
+      "console": {
+        "light": {
+          "a": "#2f2f2f",
+          "a2": "#8e8ea0",
+          "on": "#ffffff",
+          "t": "#202123",
+          "c3": "#10a37f",
+          "c4": "#b4b4c0"
+        },
+        "dark": {
+          "a": "#ececf1",
+          "a2": "#a9a9b8",
+          "on": "#202123",
+          "t": "#d9d9e3",
+          "c3": "#19c37d",
+          "c4": "#6e6e80"
+        }
+      }
+    },
+    {
+      "id": "claude",
+      "pick": {
+        "scheme": "claude"
+      },
+      "name": {
+        "zh": "Claude"
+      },
+      "thumb": "thumbs/claude.png",
+      "accent": "#D97757",
+      "console": {
+        "light": {
+          "a": "#d97757",
+          "a2": "#c2928a",
+          "on": "#1f0f08",
+          "t": "#a84e2f",
+          "c3": "#7b7974",
+          "c4": "#c6a58c"
+        },
+        "dark": {
+          "a": "#e08a6c",
+          "a2": "#d9a497",
+          "on": "#1f0f08",
+          "t": "#eba287",
+          "c3": "#97958d",
+          "c4": "#c6a58c"
+        }
+      }
+    },
+    {
+      "id": "gemini",
+      "pick": {
+        "scheme": "gemini"
+      },
+      "name": {
+        "zh": "Gemini"
+      },
+      "thumb": "thumbs/gemini.png",
+      "accent": "#4285F4",
+      "console": {
+        "light": {
+          "a": "#1a73e8",
+          "a2": "#34a853",
+          "on": "#ffffff",
+          "t": "#1a5fd0",
+          "c3": "#ea4335",
+          "c4": "#f9ab00"
+        },
+        "dark": {
+          "a": "#8ab4f8",
+          "a2": "#81c995",
+          "on": "#0b1a33",
+          "t": "#8ab4f8",
+          "c3": "#f28b82",
+          "c4": "#fdd663"
+        }
+      }
+    },
+    {
+      "id": "qwen",
+      "pick": {
+        "scheme": "qwen"
+      },
+      "name": {
+        "zh": "千问"
+      },
+      "thumb": "thumbs/qwen.png",
+      "accent": "#7F69F0",
+      "console": {
+        "light": {
+          "a": "#7560ea",
+          "a2": "#a294f5",
+          "on": "#ffffff",
+          "t": "#5b45d0",
+          "c3": "#b8a9e8",
+          "c4": "#8a8a90"
+        },
+        "dark": {
+          "a": "#a596ff",
+          "a2": "#c2b8ff",
+          "on": "#1a1240",
+          "t": "#b3a6ff",
+          "c3": "#8f82c9",
+          "c4": "#9a9aa0"
+        }
+      }
+    },
+    {
+      "id": "kimi",
+      "pick": {
+        "scheme": "kimi"
+      },
+      "name": {
+        "zh": "Kimi"
+      },
+      "thumb": "thumbs/kimi.png",
+      "accent": "#007CFF",
+      "console": {
+        "light": {
+          "a": "#0072ea",
+          "a2": "#1b1b1f",
+          "on": "#ffffff",
+          "t": "#0062cc",
+          "c3": "#6fa8e8",
+          "c4": "#8a8a90"
+        },
+        "dark": {
+          "a": "#4da3ff",
+          "a2": "#9ccaff",
+          "on": "#001a38",
+          "t": "#6fb3ff",
+          "c3": "#d0d0d4",
+          "c4": "#6a8fb8"
+        }
+      }
+    },
+    {
+      "id": "minimax",
+      "pick": {
+        "scheme": "minimax"
+      },
+      "name": {
+        "zh": "MiniMax"
+      },
+      "thumb": "thumbs/minimax.png",
+      "accent": "#D92D7A",
+      "console": {
+        "light": {
+          "a": "#d92d7a",
+          "a2": "#f2762e",
+          "on": "#ffffff",
+          "t": "#b51f62",
+          "c3": "#e8a0c0",
+          "c4": "#8a8a90"
+        },
+        "dark": {
+          "a": "#f0619e",
+          "a2": "#ff9a5c",
+          "on": "#2a0617",
+          "t": "#f58ab6",
+          "c3": "#c97aa0",
+          "c4": "#9a9aa0"
+        }
+      }
+    }
+  ],
+  "unsupported": {}
+}

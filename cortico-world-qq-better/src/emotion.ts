@@ -30,7 +30,7 @@ const LABEL_IMPACT: Record<string, number> = {
   生气: -1.8, 难过: -2.0,
 };
 
-// 情绪 → 语气指引（傲娇人设下的"演法"）
+// 情绪 → 语气指引
 const LABEL_BEHAVIOR: Record<string, string> = {
   开心: '心情好话就多：可以更活泼、爱撒娇，主动分享点有的没的；对请求也答应得爽快些。',
   得意: '可以小小炫耀一下今天的战绩，等对方来夸；被夸时嘴硬两句但藏不住开心。',
@@ -43,7 +43,7 @@ const LABEL_BEHAVIOR: Record<string, string> = {
   烦躁: '耐心变差、容易吐槽“好麻烦啊”；可以抱怨别使唤我，但别真的拒绝帮忙。',
   无语: '可以翻白眼式吐槽一句“你认真的？”，但两句就够，别追着说。',
   好奇: '对当前话题兴趣浓厚，可以追问细节，话也多点。',
-  惊讶: '语气夸张一点没关系，符合人设。',
+  惊讶: '语气夸张一点没关系。',
 };
 
 // 强度 → 程度修饰词（build_mood_hint 头用）
@@ -104,7 +104,7 @@ const MOOD_PROMPT = `你是一个情绪分析器。用户刚给 AI 助手发来�
 - 冒犯、无理取闹、被无视、被误解 → 生气/委屈/烦躁/低落/难过。
 - 对方示弱、求助、真诚分享 → 被暖到/委屈。
 - 平淡闲聊、无情绪冲击 → emotion 取"平静"（此时 strength 取 1、why 留空）。
-- 允许有人设化的傲娇/炸毛情绪，但强度别过头。`;
+- 允许有情绪起伏，但强度别过头。`;
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -335,7 +335,7 @@ export class EmotionEngine {
         lines.push(`注意：这份情绪是 ${label.by} 引起的，若眼前的人不是 TA，不要迁怒，正常交流。`);
       }
       if (negative && label.strength >= 2) {
-        lines.push('就算不爽也不许说伤人的话、不许摆烂正经问题；对方道歉或示好时给台阶就下，傲娇到点为止。');
+        lines.push('就算不爽也不许说伤人的话、不许摆烂正经问题；对方道歉或示好时给台阶就下，适度为止。');
       }
       const extra = derivedMoodLine(this.state);
       if (extra) lines.push(`底色：${extra}`);

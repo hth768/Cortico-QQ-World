@@ -161,7 +161,7 @@ export class QZonePoster {
     this.save();
   }
 
-  /** 生成一条动态文本（基于最近聊天 + 人设）。topic 可给方向，如“吐槽最近的天气”。 */
+  /** 生成一条动态文本（基于最近聊天）。topic 可给方向，如“吐槽最近的天气”。 */
   async generateContent(topic?: string): Promise<string | null> {
     const ctx = this.opts.getContext().slice(-6000);
     const whoami = this.describeSelf();
@@ -315,7 +315,7 @@ export class QZonePoster {
     const userMsg =
       `【你的身份】${whoami}\n` +
       `【某条动态下，@${p.operatorNick ?? '对方'} 评论说】${p.text ?? '（空）'}\n\n` +
-      `请直接回这条评论一句话：自然、贴合你的人设，别太长，可带 emoji，不要客套寒暄。`;
+      `请直接回这条评论一句话：自然，别太长，可带 emoji，不要客套寒暄。`;
     const text = await this.opts.chatCompletion([
       { role: 'system', content: this.cfg.autoReplyComments.systemPrompt },
       { role: 'user', content: userMsg },

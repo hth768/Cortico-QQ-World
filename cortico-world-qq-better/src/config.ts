@@ -3,6 +3,8 @@ import type { WorldSection } from 'cortico/world.ts';
 import type { QZoneConfig } from './qzone.ts';
 import type { RoutineConfig } from './proactive.ts';
 import { voiceProviderIds } from './voice.ts';
+import type { DesktopPetConfigSection } from './desktop-pet/config.ts';
+import { DESKTOP_PET_DEFAULTS } from './desktop-pet/config.ts';
 
 /** fat-fish qq_bot 的关键参数 + Cortico 内置 world 的可选项，统一为一份配置。 */
 /** 语音通话（模拟）配置：基于语音消息的"打电话"会话，支持即时听说与流式语音 */
@@ -145,6 +147,10 @@ export interface QQWorldConfig {
     dedupWindow: number;
     /** 主动消息与近期已发内容的相似度上限（0~1，字符二元组 Jaccard），超过则跳过，防同一话题反复换汤不换药。 */
     topicSimilarity: number;
+    /** 主动消息生成时模型输出 token 上限（越大单次说得越长），页面可填，默认 2000。 */
+    tokenLimit: number;
+    /** 主动说话是否带对象昵称/称呼；关闭后不称呼对方具体名字，直接用「你」。默认 true。 */
+    withNickname: boolean;
   };
   /** QQ 空间（动态/说说）：按对话与记忆发表自己的看法/吐槽/简介，可附图与@，支持删除与评论回复。 */
   qzone: QZoneConfig;
@@ -199,10 +205,9 @@ export interface QQWorldConfig {
      */
     enabled: boolean;
   };
-  /** 自称（第一人称昵称）：用于主动说话调度器与作息状态文本里替代硬编码的「本鱼」。
-   *  - 留空（默认）：优先从部署人设 prompts/ORIENTATION.md 推断自称（昵称/名字/「你是X」），
-   *    推断不到则回退到登录 QQ 昵称，再不行回退「我」。
-   *  - 填了：强制用这个值（如「肥鱼娘」「小鱼」），与 ORIENTATION 解耦，换人设零改码。 */
+  /** 自称（第一人称昵称）：用于主动说话调度器与作息状态文本。
+   *  - 留空（默认）：回退到登录 QQ 昵称，再不行回退「我」。
+   *  - 填了：强制用这个值（如「小鱼」），换称呼零改码。 */
   selfName: string;
   /** 语音收发：发语音(TTS)+收语音(ASR)。ASR 统一走顶层 asr.* 配置（与语音通话共用同一引擎，默认 funasr），
    *  此处只管 TTS 与供应商选择；实现由 voice.ts 注册表供应商决定（当前内置 native/custom/local/voxcpm，可扩展）。 */
@@ -239,7 +244,7 @@ export interface QQWorldConfig {
     voiceExtraTts: string;
     /** VoxCPM 本地 TTS 服务基址（provider 选 voxcpm 时必填），如 http://127.0.0.1:8765。 */
     voxcpmUrl: string;
-    /** VoxCPM 音色描述（自然语言），如「可爱傲娇少女音」。 */
+    /** VoxCPM 音色描述（自然语言），如「温柔女声」。 */
     voxcpmVoiceDesc: string;
     /** VoxCPM 语速（0.5~2），默认 1.0。 */
     voxcpmSpeed: number;
@@ -329,6 +334,8 @@ export interface QQWorldConfig {
    * 开启后，qq_send 对 private:<QQ> 目标跳过私聊监听名单限制，可向任意群成员发起私聊分流。默认 true。
    */
   allowPrivateRedirect?: boolean;
+  /** 桌宠（整合自 cortico-world-desktop-pet，AGPL-3.0）：默认关闭，由 enabled 开关控制。 */
+  desktopPet: DesktopPetConfigSection;
 }
 
 
@@ -372,8 +379,7 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     systemPrompt:
       '你要主动找对方说话（不是回复，是主动冒泡）。' +
       '说点自然、轻松、像真人在摸鱼时随手发的闲聊：关心一下、抛个小话题、分享点碎碎念都行。' +
-      '一两句就够，别太长别太正式，别用「请问/您好」这种客服腔，也别每条都问「在吗」。' +
-      '保持你自己的人设口吻（人设由部署级 ORIENTATION 决定）。',
+      '一两句就够，别太长别太正式，别用「请问/您好」这种客服腔，也别每条都问「在吗」。',
     endpoint: 'https://openrouter.ai/api/v1',
     apiKeySecret: 'OPENROUTER_API_KEY',
     model: 'google/gemini-2.5-flash',
@@ -388,11 +394,13 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     dailyQuota: 20,
     dedupWindow: 12,
     topicSimilarity: 0.6,
+    tokenLimit: 2000,
+    withNickname: true,
   },
   qzone: {
     enabled: false,
     systemPrompt:
-      '你现在要以第一人称在 QQ 空间发一条动态（说说）。内容要像你自己真实的朋友圈碎碎念：可以对最近聊天里某件事、某个人发表你的真实看法、吐槽、安利或简介，也可以分享当下的心情。保持你自己的人设口吻（人设由部署级 ORIENTATION 决定），自然、有梗、带点小情绪，别太长（1-3 句最佳，最多不超 100 字）。不要写成回复、不要加「在吗」、不要客服腔，可带少量 emoji。',
+      '你现在要以第一人称在 QQ 空间发一条动态（说说）。内容要像你自己真实的朋友圈碎碎念：可以对最近聊天里某件事、某个人发表你的真实看法、吐槽、安利或简介，也可以分享当下的心情。自然、有梗、带点小情绪，别太长（1-3 句最佳，最多不超 100 字）。不要写成回复、不要加「在吗」、不要客服腔，可带少量 emoji。',
     endpoint: 'https://openrouter.ai/api/v1',
     apiKeySecret: 'OPENROUTER_API_KEY',
     model: 'google/gemini-2.5-flash',
@@ -404,7 +412,7 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     autoReplyComments: {
       enabled: false,
       systemPrompt:
-        '你在 QQ 空间收到别人对你动态的评论，要回一句。自然、贴合你自己的人设口吻（由部署级 ORIENTATION 决定），像真朋友随口接话，别太长别客套，可带 emoji。',
+        '你在 QQ 空间收到别人对你动态的评论，要回一句。自然，像真朋友随口接话，别太长别客套，可带 emoji。',
       dailyQuota: 20,
       cooldownSec: 30,
     },
@@ -525,6 +533,7 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     allowSelfKick: false,
     kickRejectRejoin: true,
   },
+  desktopPet: { ...DESKTOP_PET_DEFAULTS },
 };
 
 export const QQ_SECRETS = ['QQ_ACCESS_TOKEN', 'OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'VOICE_API_KEY'];
@@ -592,6 +601,8 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
       'worlds.qqbot.qzone.autoReplyComments.enabled': { type: 'boolean', title: '自动回复空间评论', 'x-hot': false, description: '收到空间评论时自动生成并回复。需重启生效。' },
       'worlds.qqbot.qzone.commentAction': { type: 'string', title: '评论回复 action', 'x-hot': true, description: '回复评论用的 OneBot action（不同 NapCat 版本可能不同，默认 send_qzone_comment）。' },
       'worlds.qqbot.proactive.topicSimilarity': { type: 'number', title: '话题相似度上限', minimum: 0, maximum: 1, 'x-hot': true, description: '0~1：主动消息与近期已发内容相似度超过该值则跳过（防同一话题反复换汤不换药）。0=关闭。' },
+      'worlds.qqbot.proactive.tokenLimit': { type: 'integer', title: '主动消息 Token 上限', minimum: 50, maximum: 8000, 'x-hot': true, description: '主动消息生成时模型输出 token 上限（越大单次说得越长）。默认 2000，改完即时生效。' },
+      'worlds.qqbot.proactive.withNickname': { type: 'boolean', title: '主动说话带昵称/称呼', 'x-hot': true, description: '开启时主动消息会称呼对方昵称；关闭后不称呼对方具体名字，直接用「你」即可。改完即时生效。' },
       'worlds.qqbot.groupSpeak.enabled': { type: 'boolean', title: '群聊发言限速', 'x-hot': true, description: '开启后限制每个群在单位窗口内被 bot 发出的消息总量，防止刷屏/死循环灌水。' },
       'worlds.qqbot.groupSpeak.maxPerWindow': { type: 'integer', title: '窗口内最大条数', minimum: 1, maximum: 200, 'x-hot': true, description: '滑动窗口内允许发出的群消息上限（含主动与回复）。' },
       'worlds.qqbot.groupSpeak.windowSec': { type: 'integer', title: '窗口长度(秒)', minimum: 1, maximum: 3600, 'x-hot': true, description: '限速滑动窗口长度。' },
@@ -623,7 +634,7 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
       'worlds.qqbot.admin.allowSelfKick': { type: 'boolean', title: 'AI可自主踢人', 'x-hot': true, description: '为 true 时，bot 可自行判断把成员踢出群（无需人下令）。默认 false：踢人不可逆，只认“授权指挥官”（白名单/群管理员/群主）在对话里明确下令，普通成员与 AI 自主都不行。群主/管理员仍受 protectOwner/protectAdmins 保护。' },
       'worlds.qqbot.admin.kickRejectRejoin': { type: 'boolean', title: '踢人时拒绝再加群', 'x-hot': true, description: '为 true（默认）时，踢出群聊的同时附带“拒绝该用户再次加群”。为 false 则只踢出，对方仍可重新申请（能否进来取决于审核设置）。' },
       'worlds.qqbot.allowPrivateRedirect': { type: 'boolean', title: '允许私聊分流', 'x-hot': true, description: '为 true 时，群里若话题涉及隐私 / 尴尬 / 敏感，bot 可把回复改为私聊发送给当事人（而非群里公开）：qq_send 对 private:<QQ> 目标会跳过监听名单限制，直接向该群成员私聊。为 false 则只能在群里回复，无法私聊分流。' },
-      'worlds.qqbot.selfName': { type: 'string', title: '自称(第一人称)', 'x-hot': true, description: '主动说话调度器与作息状态文本里替代硬编码「本鱼」的自称。留空=从 prompts/ORIENTATION.md 推断（昵称/名字/「你是X」），推断不到回退登录 QQ 昵称、再回退「我」；填了则强制用此值，换人设零改码。' },
+      'worlds.qqbot.selfName': { type: 'string', title: '自称(第一人称)', 'x-hot': true, description: '主动说话调度器与作息状态文本里使用的自称。留空=回退到登录 QQ 昵称、再回退「我」；填了则强制用此值，换称呼零改码。' },
   },
   },
   };
@@ -654,7 +665,7 @@ export const QQ_CONFIG_GROUP: ConfigGroup = {
   'worlds.qqbot.voice.voiceTimeout': { type: 'integer', title: 'TTS 请求超时(秒)', minimum: 1, maximum: 1800, 'x-hot': false, description: 'TTS 单次请求最长等待秒数（默认 120）。本地模型推理慢可调大，超时则回退。custom 与 local 共用。ASR 识别超时单独在「语音识别」配置组设置。' },
   'worlds.qqbot.voice.voiceExtraTts': { type: 'string', title: 'TTS 额外参数(JSON)', 'x-hot': false, description: '合并进 /audio/speech 请求体的额外 JSON，用于本地模型高级特性：如 VoxCPM2 声音克隆传 {"reference_audio":"<音频url或base64>"}, 或声音设计传 {"voice_design":"一个温柔的少年音"}。留空 {} 表示无。' },
   'worlds.qqbot.voice.voxcpmUrl': { type: 'string', title: 'VoxCPM 服务地址', 'x-hot': false, description: '选 voxcpm 供应商时必填：本地 VoxCPM2 TTS 服务基址，如 http://127.0.0.1:8765。服务暴露 GET /health（就绪返回 {"ready":true,"state":"ready"}）与 POST /tts（返回 48kHz WAV）。' },
-  'worlds.qqbot.voice.voxcpmVoiceDesc': { type: 'string', title: 'VoxCPM 音色描述', 'x-hot': false, description: 'VoxCPM2 说话人音色（自然语言描述），如「可爱傲娇少女音」「温柔御姐音」。' },
+  'worlds.qqbot.voice.voxcpmVoiceDesc': { type: 'string', title: 'VoxCPM 音色描述', 'x-hot': false, description: 'VoxCPM2 说话人音色（自然语言描述），如「温柔女声」「温柔御姐音」。' },
   'worlds.qqbot.voice.voxcpmSpeed': { type: 'number', title: 'VoxCPM 语速', minimum: 0.5, maximum: 2, 'x-hot': false, description: 'VoxCPM2 合成语速（0.5~2，默认 1.0）。' },
   'worlds.qqbot.voice.voxcpmTimesteps': { type: 'integer', title: 'VoxCPM 推理步数', minimum: 1, maximum: 50, 'x-hot': false, description: 'VoxCPM2 推理步数（越小越快越夸张，默认 10）。' },
   'worlds.qqbot.voice.voxcpmSeed': { type: 'integer', title: 'VoxCPM 随机种子', minimum: 0, maximum: 2147483647, 'x-hot': false, description: 'VoxCPM2 随机种子（0=随机，>0 固定音色/韵律可复现）。' },
@@ -846,6 +857,8 @@ export function normalizeConfig(raw: QQConfigSection): QQWorldConfig {
   if (typeof p.dailyQuota !== 'number') p.dailyQuota = QQ_DEFAULTS.proactive.dailyQuota;
   if (typeof p.dedupWindow !== 'number') p.dedupWindow = QQ_DEFAULTS.proactive.dedupWindow;
   if (typeof p.topicSimilarity !== 'number' || (p.topicSimilarity as number) < 0 || (p.topicSimilarity as number) > 1) p.topicSimilarity = QQ_DEFAULTS.proactive.topicSimilarity;
+  if (typeof p.tokenLimit !== 'number' || (p.tokenLimit as number) < 50) p.tokenLimit = QQ_DEFAULTS.proactive.tokenLimit;
+  if (typeof p.withNickname !== 'boolean') p.withNickname = QQ_DEFAULTS.proactive.withNickname;
   // qzone 子对象原地合并
   c.qzone = c.qzone && typeof c.qzone === 'object' ? c.qzone : {};
   Object.assign(c.qzone, { ...QQ_DEFAULTS.qzone, ...(c.qzone as Record<string, unknown>) });
@@ -1003,6 +1016,11 @@ export function normalizeConfig(raw: QQConfigSection): QQWorldConfig {
   if (typeof adm.kickRejectRejoin !== 'boolean') adm.kickRejectRejoin = true;
   c.admin = adm as QQWorldConfig['admin'];
   if (typeof c.allowPrivateRedirect !== 'boolean') c.allowPrivateRedirect = true;
+  // 桌宠整合段：以 DESKTOP_PET_DEFAULTS 兜底，再用用户配置覆盖；enabled 默认 false。
+  const userPet = (c.desktopPet && typeof c.desktopPet === 'object' ? c.desktopPet : {}) as Record<string, unknown>;
+  const pet = { ...DESKTOP_PET_DEFAULTS, ...userPet } as Record<string, unknown>;
+  if (typeof pet.enabled !== 'boolean') pet.enabled = false;
+  c.desktopPet = pet as DesktopPetConfigSection;
   return c;
 }
 

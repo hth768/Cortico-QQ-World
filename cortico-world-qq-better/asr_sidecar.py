@@ -3,7 +3,7 @@
 """
 本地 ASR 侧车：OpenAI 兼容 /transcriptions 端点（multipart: file=wav + model）。
 
-由 cortico-world-qq-better 在 call.asrMode='local' 时自动拉起（见 src/world.ts）。
+由 cortico-world-qq-final 在 call.asrMode='local' 时自动拉起（见 src/world.ts）。
 无需写死密钥：纯本地、离线，CPU 即可。
 
 引擎：
@@ -14,7 +14,7 @@
 
 用法（扩展会自动拼好参数）：
   python asr_sidecar.py <port> --engine funasr --model-dir <本地模型目录或留空>
-  （模型目录由调用方 cortico-world-qq-better 的 call.asrLocalModelPath / 环境变量 QQBOT_ASR_MODEL_DIR 决定，本脚本不写死任何路径）
+  （模型目录由调用方 cortico-world-qq-final 的 call.asrLocalModelPath / 环境变量 QQBOT_ASR_MODEL_DIR 决定，本脚本不写死任何路径）
 """
 import argparse
 import io

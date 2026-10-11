@@ -1,8 +1,12 @@
-# cortico-world-qq-better
+# cortico-world-qq-final
+
+> ⚠️ **许可证说明（重要）**：自 `0.1.64` 起，本扩展整合了来自 [`cortico-world-desktop-pet`](https://github.com/Pal-AI-Lab/Coopanion)（**AGPL-3.0-or-later**，© Pal-AI-Lab）的**桌宠**功能代码（`src/desktop-pet/`、`web/`、`host/`），以及来自 [`cortico-world-cua`](https://github.com/Pal-AI-Lab/Coopanion)（**AGPL-3.0-or-later**）的**电脑操控**代码（`src/cua/`）。这些部分受 **AGPL-3.0-or-later** 约束，其完整许可证文本见本仓库 `LICENSE`（已替换为 AGPL-3.0 全文）及 `THIRD_PARTY_NOTICES.md`。本扩展原有 QQ 相关代码原以 MIT 授权，版权归原作者；**本组合品整体以 AGPL-3.0-or-later 提供**，依据 AGPL 第 13 条，任何人有权获取本组合品的完整对应源码（即本仓库）。
+
+> 📦 **更名提示**：本包原名为 `cortico-world-qq-better`，自 `0.1.61` 起更名为 `cortico-world-qq-final`（代码完全一致，仅包名变化）。旧名已标记为废弃（deprecated），请改为安装本包。
 
 Cortico 的 **QQ（OneBot v11 / NapCat）** World 扩展。以 `fat-fish` 仓库的 `qq_bot` 插件为**本体**，并增量吸收了 Cortico 内置 `qq` world 的特性。
 
-- 包名：`cortico-world-qq-better`
+- 包名：`cortico-world-qq-final`
 - World id：`qqbot`（与内置 `qq` 区分，可并存；如需独占可禁用内置 world）
 - 框架契约：`api: 5`
 
@@ -333,7 +337,7 @@ interface VoiceProvider {
 
 ## 部署
 
-1. 把本目录装进部署副本：`Cortico/extensions/node_modules/cortico-world-qq-better/`（保留 `src/`、`package.json`、`README.md`、`ENV_PROMPT.md`）。
+1. 把本目录装进部署副本：`Cortico/extensions/node_modules/cortico-world-qq-final/`（保留 `src/`、`package.json`、`README.md`、`ENV_PROMPT.md`）。
 2. `cd` 到该副本，`corepack pnpm install --prod` 安装 `ws` 依赖。
 3. 在部署的 `config.json` 写入：
    ```json

@@ -56,7 +56,7 @@ export interface RuntimeVoiceCfg {
   ffmpegCandidates: string[];
   /** VoxCPM 本地 TTS 服务基址（provider 选 voxcpm 时必填），如 http://127.0.0.1:8765。 */
   voxcpmUrl: string;
-  /** VoxCPM 音色描述（自然语言），如「可爱傲娇少女音」。 */
+  /** VoxCPM 音色描述（自然语言），如「温柔女声」。 */
   voxcpmVoiceDesc: string;
   /** VoxCPM 语速（0.5~2），默认 1.0。 */
   voxcpmSpeed: number;
@@ -321,7 +321,7 @@ async function voxcpmSynthesize(ctx: VoiceSynthCtx): Promise<RecordSeg | null> {
   }
   const payload: Record<string, unknown> = {
     text,
-    voice_desc: cfg.voxcpmVoiceDesc || '可爱傲娇少女音',
+    voice_desc: cfg.voxcpmVoiceDesc || '自然女声',
     speed: cfg.voxcpmSpeed > 0 ? cfg.voxcpmSpeed : 1.0,
     inference_timesteps: cfg.voxcpmTimesteps > 0 ? cfg.voxcpmTimesteps : 10,
   };

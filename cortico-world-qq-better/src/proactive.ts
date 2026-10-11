@@ -61,7 +61,7 @@ export interface ProactiveConfig {
   enabled: boolean;
   /** 对哪些会话主动说话：private=仅私聊；group=仅群；both=都。 */
   mode: 'private' | 'group' | 'both';
-  /** 生成主动消息用的 system 提示（人设 + 闲聊风格）。 */
+  /** 生成主动消息用的 system 提示（闲聊风格）。 */
   systemPrompt: string;
   /** OpenAI 兼容 chat 端点（默认与视觉共用 OpenRouter）。 */
   endpoint: string;
@@ -91,6 +91,10 @@ export interface ProactiveConfig {
   dedupWindow: number;
   /** 主动消息与近期已发内容相似度上限（0~1，字符二元组 Jaccard）；超过则跳过，防同一话题反复换汤不换药。 */
   topicSimilarity: number;
+  /** 主动消息生成时模型输出 token 上限（越大单次说得越长），页面可填，默认 2000。 */
+  tokenLimit: number;
+  /** 主动说话是否带对象昵称/称呼；关闭后不称呼对方具体名字，直接用「你」。默认 true。 */
+  withNickname: boolean;
 }
 
 export type ChatMsg = { role: 'system' | 'user' | 'assistant'; content: string };
@@ -123,7 +127,7 @@ export class ProactiveSpeaker {
   private readonly isPaused?: () => boolean;
   private readonly systemPromptFor?: (target: ProactiveTarget) => string;
   private readonly routine?: RoutineConfig;
-  /** 自称（第一人称昵称），替换提示语里的硬编码「本鱼」。 */
+  /** 自称（第一人称昵称）。 */
   private readonly selfName: string;
 
   private readonly states = new Map<string, AddrState>();
@@ -149,7 +153,7 @@ export class ProactiveSpeaker {
     systemPromptFor?: (target: ProactiveTarget) => string;
     /** 作息配置：睡眠段暂停主动冒泡 + 时段切换播报。 */
     routine?: RoutineConfig;
-    /** 自称（第一人称昵称），替换提示语里的硬编码「本鱼」。 */
+    /** 自称（第一人称昵称）。 */
     selfName?: string;
   }) {
     this.cfg = opts.cfg;
@@ -335,7 +339,9 @@ export class ProactiveSpeaker {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
-    const who = t.kind === 'private' ? `私聊「${t.label}」` : `群「${t.label}」`;
+    const who = this.cfg.withNickname
+      ? (t.kind === 'private' ? `私聊「${t.label}」` : `群「${t.label}」`)
+      : (t.kind === 'private' ? '你正在私聊的对象' : '你正在群聊里的对象');
     const hint = forced ? '（这是被手动触发的主动发言，务必说点有意思的）' : '';
     const avoid = this.recent.length ? `\n不要和之前说过的内容重复：\n- ${this.recent.slice(-5).join('\n- ')}` : '';
     // 作息提示：午休段让主动冒泡更简短自然（睡眠段已在 tick 里被拦下，不会走到这里）。
@@ -346,7 +352,7 @@ export class ProactiveSpeaker {
     return `现在是 ${hh}:${mm}。你要主动向${who}说一句话（闲聊/关心/抛个话题都行，别太生硬，也别太长，一两句即可）。${hint}${avoid}${routineNote}\n\n注意：只聊系统提示里「真实对话」里出现过的事；如果没什么可接的，就泛泛关心/问候，或返回空（什么都不说）。绝不要编造没发生过的事件或细节。`;
   }
 
-  /** 时段切换时，向所有可主动说话的会话播报一句（去睡/醒/午休）。文案由 LLM 现场生成（带人设+记忆），每次说法不固定；生成失败才回退到配置里的固定文案。 */
+  /** 时段切换时，向所有可主动说话的会话播报一句（去睡/醒/午休）。文案由 LLM 现场生成（带记忆），每次说法不固定；生成失败才回退到配置里的固定文案。 */
   private async announceRoutine(prev: 'sleep' | 'lazy' | 'active', seg: 'sleep' | 'lazy' | 'active'): Promise<void> {
     // 确定切换场景与兜底文案（兜底仅在 LLM 生成失败时使用）。
     let fallback = '';
@@ -359,7 +365,7 @@ export class ProactiveSpeaker {
     for (const t of this.getTargets()) {
       const system = this.systemPromptFor ? this.systemPromptFor(t) : this.cfg.systemPrompt;
       const userPrompt =
-        `【作息播报·${scene}】现在是本鱼作息时段切换的时刻（从「${prev}」切到「${seg}」）。` +
+        `【作息播报·${scene}】现在是我作息时段切换的时刻（从「${prev}」切到「${seg}」）。` +
         `请直接用你自己的口吻、自然地说一句这种场景下的话（比如${scene}时的随口感慨或碎碎念），一两句即可，别太长别太正式。` +
         `每次可以换种说法，不要每次都一模一样，也不要念固定套话。不要加「在吗」、不要客服腔。`;
       let line = '';

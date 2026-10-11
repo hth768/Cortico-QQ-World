@@ -4,6 +4,8 @@ import type {
   ConsolePanelContext,
 } from 'cortico/web/shared/client-panel.ts';
 
+import petConsole from '../desktop-pet/console/client.ts';
+
 type FieldDef = {
   key: string;
   type: string;
@@ -305,6 +307,10 @@ const panels: Record<string, ConsolePanel> = {};
 for (const m of MODULES) panels[m.id] = makePanel(m);
 panels['roster'] = rosterPanel;
 panels['events'] = eventsPanel;
+
+// 桌宠面板（整合自 cortico-world-desktop-pet，AGPL-3.0）：pet 与 pet-voice（原 voice，改名避免与 QQ 自带 voice 冲突）。
+panels['pet'] = petConsole.panels['pet'];
+panels['pet-voice'] = petConsole.panels['voice'];
 
 const bundle: ConsoleClientBundle = { panels };
 export default bundle;

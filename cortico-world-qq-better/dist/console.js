@@ -1,4 +1,404 @@
-// src/console/client.ts
+// Cortico-QQ-World/cortico-world-qq-better/src/desktop-pet/console/client.ts
+var MODES = { hold: "\u6309\u4F4F\u8BF4\u8BDD\u952E\u65F6\u6536\u97F3", toggle: "\u7528\u8BF4\u8BDD\u952E\u5F00\u5173\u6536\u97F3", always: "\u4E00\u76F4\u6536\u97F3" };
+var CODE_KEYS = {
+  ControlLeft: "LeftCtrl",
+  ControlRight: "RightCtrl",
+  AltLeft: "LeftAlt",
+  AltRight: "RightAlt",
+  ShiftLeft: "LeftShift",
+  ShiftRight: "RightShift",
+  MetaLeft: "Win",
+  MetaRight: "RightWin",
+  Space: "Space",
+  Tab: "Tab",
+  CapsLock: "CapsLock",
+  Backquote: "Backquote",
+  Enter: "Enter",
+  Insert: "Insert",
+  Delete: "Delete",
+  Home: "Home",
+  End: "End",
+  PageUp: "PageUp",
+  PageDown: "PageDown",
+  Pause: "Pause",
+  ScrollLock: "ScrollLock"
+};
+var keyOfCode = (code) => CODE_KEYS[code] ?? (/^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit\d$/.test(code) ? code.slice(5) : /^F\d{1,2}$/.test(code) ? code : null);
+var PRESSES = {
+  2: { hold: "\u53CC\u51FB\u518D\u6309\u4F4F", toggle: "\u53CC\u51FB\u5F00\u59CB,\u518D\u53CC\u51FB\u505C" },
+  1: { hold: "\u76F4\u63A5\u6309\u4F4F", toggle: "\u6309\u4E00\u4E0B\u5F00\u59CB,\u518D\u6309\u4E00\u4E0B\u505C" },
+  3: { hold: "\u4E09\u51FB\u518D\u6309\u4F4F", toggle: "\u4E09\u51FB\u5F00\u59CB,\u518D\u4E09\u51FB\u505C" }
+};
+var splitTaps = (hotkey) => {
+  const m = /^(.*?)\s*\*\s*([1-3])$/.exec(hotkey.trim());
+  return m ? { combo: m[1], taps: Number(m[2]) } : { combo: hotkey.trim(), taps: 1 };
+};
+var withTaps = (combo, taps) => taps > 1 ? `${combo}*${taps}` : combo;
+var MB = (n) => `${Math.round(n / 1048576)} MB`;
+var progress = (a) => a.total ? `${Math.round(a.done / a.total * 100)}%` : MB(a.done);
+var errText = (err) => err instanceof Error ? err.message : String(err);
+function statusRow(ctx, name) {
+  const { ui } = ctx;
+  const row = ui.h("div", "mountrow");
+  const dot = ui.h("span", "navdot");
+  const state = ui.h("span", "mstate", "\u2014");
+  const detail = ui.h("span", "mdetail");
+  const acts = ui.h("span", "macts");
+  row.append(dot, ui.h("span", "mname", name), state, detail, acts);
+  return {
+    row,
+    acts,
+    set(text, tone, more = "") {
+      state.textContent = text;
+      detail.textContent = more;
+      dot.className = `navdot ${tone === "on" ? "ok" : tone === "bad" ? "bad" : tone === "busy" ? "warn" : ""}`;
+    }
+  };
+}
+var petPanel = {
+  mount(ctx) {
+    const { ui, root } = ctx;
+    const card = ui.sheet({ title: "\u684C\u5BA0", en: "pet" });
+    root.appendChild(card.el);
+    const s = card.body;
+    const msg = ui.msgline("");
+    const win = statusRow(ctx, "\u684C\u5BA0\u7A97\u53E3");
+    const btnOpen = ui.button("\u6253\u5F00\u7A97\u53E3", { size: "sm", variant: "primary" });
+    const btnClose = ui.button("\u5173\u95ED\u7A97\u53E3", { size: "sm" });
+    win.acts.append(btnClose, btnOpen);
+    const rt = statusRow(ctx, "\u7A97\u53E3\u8FD0\u884C\u65F6");
+    const btnIdentify = ui.button("\u8BC6\u522B\u8FD0\u884C\u65F6", { size: "sm" });
+    const btnInstall = ui.button("\u5B89\u88C5", { size: "sm", variant: "primary" });
+    rt.acts.append(btnIdentify, btnInstall);
+    const pathRow = statusRow(ctx, "\u8FD0\u884C\u65F6\u8DEF\u5F84");
+    const pathInput = ui.h("input", "pet-path-input");
+    pathInput.type = "text";
+    pathInput.placeholder = "\u7A97\u53E3\u8FD0\u884C\u65F6\u8DEF\u5F84\uFF08Electron \u7A0B\u5E8F\uFF0C\u7559\u7A7A\u7528\u9ED8\u8BA4\uFF09";
+    pathInput.style.width = "240px";
+    const btnSavePath = ui.button("\u4FDD\u5B58\u8DEF\u5F84", { size: "sm", variant: "primary" });
+    pathRow.acts.append(pathInput, btnSavePath);
+    const candList = ui.h("div", "pet-cands");
+    const links = ui.rowbar();
+    const open = ui.h("a", "btn sm", "\u5728\u6D4F\u89C8\u5668\u91CC\u770B");
+    open.target = "_blank";
+    open.rel = "noopener";
+    links.append(open, msg);
+    const frameWrap = ui.h("div", "pet-dressframe");
+    const frame = ui.h("iframe");
+    frame.title = "\u88C5\u626E";
+    frameWrap.append(frame);
+    s.append(win.row, rt.row, pathRow.row, candList, links, ui.section("\u88C5\u626E", "\u6539\u52A8\u4F1A\u7ACB\u523B\u4FDD\u5B58,\u5E76\u540C\u6B65\u5230\u684C\u5BA0\u7A97\u53E3"), frameWrap);
+    let st = null;
+    const render = (next) => {
+      st = next;
+      const disabledMsg = next.message;
+      if (!next.electron || disabledMsg) {
+        if (disabledMsg) msg.textContent = disabledMsg;
+        return;
+      }
+      const w = next.window;
+      if (document.activeElement !== pathInput) pathInput.value = next.electronFile ?? "";
+      if (next.connected) win.set("\u5DF2\u8FDE\u63A5", "on");
+      else if (w?.phase === "running") win.set("\u542F\u52A8\u4E2D", "busy");
+      else win.set(w?.phase === "missing" || w?.phase === "error" ? "\u6253\u4E0D\u5F00" : "\u672A\u6253\u5F00", w?.phase === "missing" || w?.phase === "error" ? "bad" : "off", w?.detail ?? "");
+      btnOpen.disabled = w?.phase === "running";
+      btnClose.disabled = w?.phase !== "running";
+      const e = next.electron;
+      if (w?.source && w.source !== e.path && e.phase !== "ready") rt.set("\u7528\u5916\u90E8\u7A0B\u5E8F", "on", w.source);
+      else if (e.phase === "ready") rt.set("\u5DF2\u5B89\u88C5", "on", e.path);
+      else if (e.phase === "working") rt.set(`\u4E0B\u8F7D\u4E2D ${progress(e)}`, "busy", e.detail ?? "");
+      else if (e.phase === "error") rt.set("\u5B89\u88C5\u5931\u8D25", "bad", e.detail ?? "");
+      else rt.set(e.supported ? "\u672A\u5B89\u88C5" : "\u672C\u5E73\u53F0\u6CA1\u6709\u9884\u7F16\u8BD1\u5305", "off", e.supported ? "Electron 44.4.4,\u7EA6 150 MB" : "");
+      btnInstall.hidden = e.phase === "ready" || !e.supported;
+      btnInstall.disabled = e.phase === "working";
+      if (next.url) open.href = next.url;
+      if (next.dressUrl && frame.dataset.src !== next.dressUrl) {
+        frame.dataset.src = next.dressUrl;
+        frame.src = next.dressUrl;
+      }
+    };
+    const refresh = async () => {
+      try {
+        render(await ctx.invoke("state"));
+      } catch (err) {
+        msg.textContent = errText(err);
+      }
+    };
+    const call = (method) => async () => {
+      try {
+        render(await ctx.invoke(method));
+      } catch (err) {
+        msg.textContent = errText(err);
+      }
+    };
+    btnOpen.addEventListener("click", call("openWindow"));
+    btnClose.addEventListener("click", call("closeWindow"));
+    btnInstall.addEventListener("click", call("installElectron"));
+    btnIdentify.addEventListener("click", async () => {
+      try {
+        const r = await ctx.invoke("identifyRuntime");
+        const found = r.candidates ?? [];
+        candList.replaceChildren();
+        if (found.length === 0) {
+          msg.textContent = r.ok ? `\u8BC6\u522B\u7ED3\u679C\uFF1A\u5C06\u4F7F\u7528 ${r.source}` : `\u6CA1\u627E\u5230\u53EF\u7528\u8FD0\u884C\u65F6\uFF0C\u4E5F\u6CA1\u5728\u7535\u8111\u91CC\u626B\u5230\u73B0\u6210\u7684 Electron\uFF1A${r.detail ?? ""}`;
+          return;
+        }
+        msg.textContent = `\u5728\u7535\u8111\u91CC\u627E\u5230 ${found.length} \u4E2A\u73B0\u6210\u8FD0\u884C\u65F6` + (r.ok ? `\uFF0C\u5F53\u524D\u5C06\u4F7F\u7528 ${r.source}` : "\uFF0C\u70B9\u300C\u7528\u8FD9\u4E2A\u300D\u9009\u7528\u5176\u4E2D\u4E00\u4E2A");
+        for (const c of found) {
+          const item = ui.h("div", "pet-cand");
+          const label = ui.h("span", "pet-cand-path", c);
+          const use = ui.button("\u7528\u8FD9\u4E2A", { size: "xs", variant: "primary" });
+          use.addEventListener("click", async () => {
+            try {
+              render(await ctx.invoke("setElectronFile", [c]));
+              msg.textContent = `\u5DF2\u8BBE\u4E3A\u7528 ${c}`;
+            } catch (err) {
+              msg.textContent = errText(err);
+            }
+          });
+          item.append(label, use);
+          candList.append(item);
+        }
+      } catch (err) {
+        msg.textContent = errText(err);
+      }
+    });
+    btnSavePath.addEventListener("click", async () => {
+      try {
+        render(await ctx.invoke("setElectronFile", [pathInput.value.trim()]));
+        msg.textContent = "\u5DF2\u4FDD\u5B58\u7A97\u53E3\u8FD0\u884C\u65F6\u8DEF\u5F84";
+      } catch (err) {
+        msg.textContent = errText(err);
+      }
+    });
+    void refresh();
+    ctx.interval(() => void refresh(), 1500);
+  }
+};
+var FLOOR_DB = -60;
+var meterPct = (db) => Math.max(0, Math.min(100, (db - FLOOR_DB) / -FLOOR_DB * 100));
+var voicePanel = {
+  mount(ctx) {
+    const { ui, root } = ctx;
+    const card = ui.sheet({ title: "\u8BED\u97F3\u8F93\u5165", en: "voice" });
+    root.appendChild(card.el);
+    const s = card.body;
+    const msg = ui.msgline("");
+    const master = ui.h("label", "pet-master");
+    const masterText = ui.h("span", "pet-mastertext");
+    const masterTitle = ui.h("span", "pet-mastertitle", "\u5F00\u542F\u8BED\u97F3\u8F93\u5165");
+    const masterHint = ui.h("span", "pet-masterhint");
+    masterText.append(masterTitle, masterHint);
+    const enabled = ui.h("input", "pet-switch");
+    enabled.type = "checkbox";
+    enabled.setAttribute("role", "switch");
+    enabled.addEventListener("change", () => void call("setEnabled", [enabled.checked])());
+    master.append(masterText, enabled);
+    const settings = ui.h("div", "pet-voicebody");
+    const eng = statusRow(ctx, "\u8BC6\u522B\u5F15\u64CE");
+    const engineSel = ui.select();
+    eng.acts.append(engineSel);
+    const srv = statusRow(ctx, "\u8BC6\u522B\u670D\u52A1");
+    const btnStart = ui.button("\u542F\u52A8", { size: "sm", variant: "primary" });
+    const btnStop = ui.button("\u505C\u6B62", { size: "sm" });
+    srv.acts.append(btnStop, btnStart);
+    const rt = statusRow(ctx, "\u8BC6\u522B\u6A21\u578B");
+    const btnInstall = ui.button("\u4E0B\u8F7D", { size: "sm", variant: "primary" });
+    rt.acts.append(btnInstall);
+    const micRow = statusRow(ctx, "\u9EA6\u514B\u98CE");
+    const deviceSel = ui.select();
+    micRow.acts.append(deviceSel);
+    const modeRow = statusRow(ctx, "\u6536\u97F3\u65B9\u5F0F");
+    const modeSel = ui.select();
+    modeSel.replaceChildren(...Object.keys(MODES).map((m) => {
+      const o = ui.h("option", null, MODES[m]);
+      o.value = m;
+      return o;
+    }));
+    const pressSel = ui.select();
+    const keyBtn = ui.button("", { size: "sm" });
+    modeRow.acts.append(modeSel, pressSel, keyBtn);
+    const meter = ui.h("div", "pet-meter");
+    const fill = ui.h("div", "pet-meterfill");
+    const mark = ui.h("div", "pet-metermark");
+    meter.append(fill, mark);
+    const log = ui.log({ max: 100 });
+    settings.append(eng.row, srv.row, rt.row, micRow.row, modeRow.row, meter, ui.section("\u8BC6\u522B\u7ED3\u679C", "\u5212\u6389\u7684\u662F\u592A\u77ED\u6216\u7591\u4F3C\u5E7B\u89C9\u3001\u6CA1\u6709\u53D1\u51FA\u53BB\u7684"), log.el);
+    s.append(master, msg, settings);
+    let st = null;
+    let seen = 0;
+    const render = (next) => {
+      st = next;
+      const disabledMsg = next.message;
+      if (!next.model || disabledMsg) {
+        if (disabledMsg) msg.textContent = disabledMsg;
+        return;
+      }
+      enabled.checked = next.enabled;
+      master.classList.toggle("on", next.enabled);
+      masterHint.textContent = next.enabled ? "\u5DF2\u5F00\u542F:\u9EA6\u514B\u98CE\u4E00\u76F4\u6253\u5F00,\u6309\u4E0B\u9762\u7684\u6536\u97F3\u65B9\u5F0F\u628A\u8BF4\u7684\u8BDD\u53D1\u7ED9\u684C\u5BA0" : "\u5DF2\u5173\u95ED:\u4E0D\u6253\u5F00\u9EA6\u514B\u98CE,\u4E0B\u9762\u7684\u8BBE\u7F6E\u6682\u4E0D\u751F\u6548";
+      settings.classList.toggle("off", !next.enabled);
+      const engines = { funasr: "FunASR(\u672C\u673A\u8BC6\u522B)" };
+      if (next.systemSupported) engines.system = "Windows \u81EA\u5E26";
+      if (engineSel.dataset.list !== JSON.stringify(engines)) {
+        engineSel.dataset.list = JSON.stringify(engines);
+        engineSel.replaceChildren(...Object.keys(engines).map((k) => {
+          const o = ui.h("option", null, engines[k] ?? k);
+          o.value = k;
+          return o;
+        }));
+      }
+      if (document.activeElement !== engineSel) engineSel.value = next.engine;
+      eng.set(
+        next.engine === "system" ? "Windows \u81EA\u5E26" : "FunASR",
+        "on",
+        next.engine === "system" ? "\u4E0D\u7528\u4E0B\u8F7D,\u51C6\u786E\u5EA6\u4E00\u822C;\u60F3\u8981\u66F4\u51C6\u6362\u6210 FunASR" : "SenseVoiceSmall,\u5728\u672C\u673A\u8BC6\u522B,\u4E2D\u6587\u51C6;\u6A21\u578B\u4E0B\u8F7D\u4E00\u6B21\u5C31\u80FD\u4E00\u76F4\u7528"
+      );
+      const sv = next.server;
+      if (!sv) srv.set("\u2014", "off");
+      else if (sv.phase === "running") srv.set("\u5C31\u7EEA", "on", sv.url);
+      else if (sv.phase === "starting") srv.set("\u542F\u52A8\u4E2D", "busy", sv.url);
+      else if (sv.phase === "error") srv.set("\u51FA\u9519", "bad", sv.detail ?? "");
+      else srv.set("\u5DF2\u505C\u6B62", "off", sv.url);
+      btnStart.disabled = sv?.phase === "running" || sv?.phase === "starting";
+      btnStop.disabled = sv?.phase !== "running";
+      const m = next.model;
+      if (m.phase === "working") rt.set(`\u4E0B\u8F7D\u4E2D ${progress(m)}`, "busy", m.detail ?? "");
+      else if (m.phase === "error") rt.set("\u4E0B\u8F7D\u5931\u8D25", "bad", m.detail ?? "");
+      else if (m.phase === "ready") rt.set("\u5DF2\u4E0B\u8F7D", "on", m.path);
+      else rt.set("\u8FD8\u6CA1\u4E0B\u8F7D", "off", `\u7EA6 ${MB(m.bytes)},\u4ECE ModelScope \u4E0B\u8F7D,\u56FD\u5185\u53EF\u7528`);
+      btnInstall.disabled = m.phase === "working";
+      btnInstall.hidden = m.phase === "ready";
+      btnInstall.textContent = m.phase === "error" ? "\u91CD\u8BD5" : "\u4E0B\u8F7D";
+      rt.row.style.display = next.engine === "funasr" ? "" : "none";
+      const mic = next.mic;
+      micRow.set({ on: "\u6536\u97F3\u4E2D", off: "\u6CA1\u5728\u6536", denied: "\u88AB\u62D2\u7EDD", error: "\u51FA\u9519" }[mic.state] ?? mic.state, mic.state === "on" ? "on" : mic.state === "off" ? "off" : "bad", mic.detail ?? "");
+      const input = next.input;
+      const choices = [{ id: "", label: "\u7CFB\u7EDF\u9ED8\u8BA4" }, ...input.devices];
+      if (input.deviceId && !choices.some((d) => d.id === input.deviceId)) choices.push({ id: input.deviceId, label: "\u4E4B\u524D\u9009\u7684\u8BBE\u5907(\u73B0\u5728\u627E\u4E0D\u5230)" });
+      if (deviceSel.dataset.list !== JSON.stringify(choices)) {
+        deviceSel.dataset.list = JSON.stringify(choices);
+        deviceSel.replaceChildren(...choices.map((d, i) => {
+          const o = ui.h("option", null, d.label || `\u9EA6\u514B\u98CE ${i}`);
+          o.value = d.id;
+          return o;
+        }));
+      }
+      if (document.activeElement !== deviceSel) deviceSel.value = input.deviceId;
+      if (document.activeElement !== modeSel) modeSel.value = input.mode;
+      const { taps } = splitTaps(input.hotkey);
+      const press = input.mode === "toggle" ? "toggle" : "hold";
+      const presses = Object.keys(PRESSES).map(Number).filter((n) => n < 3 || n === taps).map((n) => [n, PRESSES[n][press]]);
+      if (pressSel.dataset.list !== JSON.stringify(presses)) {
+        pressSel.dataset.list = JSON.stringify(presses);
+        pressSel.replaceChildren(...presses.map(([n, label]) => {
+          const o = ui.h("option", null, label);
+          o.value = String(n);
+          return o;
+        }));
+      }
+      if (document.activeElement !== pressSel) pressSel.value = String(taps);
+      if (!capturing) keyBtn.textContent = `\u8BF4\u8BDD\u952E:${input.keyLabel}`;
+      keyBtn.hidden = pressSel.hidden = input.mode === "always";
+      modeRow.set(input.open ? "\u6B63\u5728\u6536\u97F3" : "\u7B49\u8BF4\u8BDD\u952E", input.open ? "on" : "off", input.hotkeyProblem ? `${input.hotkeyProblem},\u6539\u4E3A\u4E00\u76F4\u6536\u97F3` : input.hint);
+      mark.hidden = input.effectiveMode === "hold";
+      mark.style.left = `${meterPct(next.thresholdDb)}%`;
+      for (const line of next.recent) {
+        if (line.at <= seen) continue;
+        seen = line.at;
+        const el = log.append(line.text, line.dropped ? "dim" : "plain");
+        if (line.dropped) el.style.textDecoration = "line-through";
+      }
+    };
+    const refresh = async () => {
+      try {
+        render(await ctx.invoke("state"));
+      } catch (err) {
+        msg.textContent = errText(err);
+      }
+    };
+    const call = (method, args = []) => async () => {
+      try {
+        render(await ctx.invoke(method, args));
+        msg.textContent = "";
+      } catch (err) {
+        msg.textContent = errText(err);
+      }
+    };
+    btnStart.addEventListener("click", call("start"));
+    engineSel.addEventListener("change", () => void call("setEngine", [engineSel.value])());
+    btnStop.addEventListener("click", call("stop"));
+    btnInstall.addEventListener("click", call("install"));
+    modeSel.addEventListener("change", () => void call("setMic", [{ mode: modeSel.value }])());
+    deviceSel.addEventListener("change", () => void call("setMic", [{ deviceId: deviceSel.value }])());
+    pressSel.addEventListener("change", () => {
+      if (st) void call("setMic", [{ hotkey: withTaps(splitTaps(st.input.hotkey).combo, Number(pressSel.value)) }])();
+    });
+    let capturing = false;
+    const held = [];
+    const finishCapture = (combo) => {
+      capturing = false;
+      held.length = 0;
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("pointerdown", onPointer, true);
+      if (combo && st) void call("setMic", [{ hotkey: withTaps(combo, splitTaps(st.input.hotkey).taps) }])();
+      else void refresh();
+    };
+    const onKeyDown = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code === "Escape") {
+        finishCapture(null);
+        return;
+      }
+      const k = keyOfCode(e.code);
+      if (k && !held.includes(k)) held.push(k);
+    };
+    const onKeyUp = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (held.length) finishCapture(held.join("+"));
+    };
+    const onPointer = (e) => {
+      const k = { 1: "Mouse3", 3: "Mouse4", 4: "Mouse5" }[e.button];
+      if (!k) return;
+      e.preventDefault();
+      e.stopPropagation();
+      finishCapture([...held, k].join("+"));
+    };
+    keyBtn.addEventListener("click", () => {
+      if (capturing) {
+        finishCapture(null);
+        return;
+      }
+      capturing = true;
+      keyBtn.textContent = "\u6309\u4E0B\u65B0\u7684\u8BF4\u8BDD\u952E,\u53EF\u4EE5\u662F\u7EC4\u5408\u952E\u6216\u9F20\u6807\u4FA7\u952E\u2026(Esc \u53D6\u6D88)";
+      window.addEventListener("keydown", onKeyDown, true);
+      window.addEventListener("keyup", onKeyUp, true);
+      window.addEventListener("pointerdown", onPointer, true);
+    });
+    ctx.own({ dispose: () => {
+      if (capturing) finishCapture(null);
+    } });
+    ctx.stream({
+      message: (text) => {
+        const f = JSON.parse(text);
+        if (f.type === "level" && typeof f.level === "number") {
+          fill.style.width = `${meterPct(f.level)}%`;
+          fill.classList.toggle("on", !!f.speaking);
+          meter.classList.toggle("open", !!f.open);
+        } else void refresh();
+      }
+    });
+    void refresh();
+    ctx.interval(() => void refresh(), 1500);
+  }
+};
+var bundle = { panels: { pet: petPanel, voice: voicePanel } };
+var client_default = bundle;
+
+// Cortico-QQ-World/cortico-world-qq-better/src/console/client.ts
 var MODULES = [
   { id: "general", title: "\u8FDE\u63A5\u4E0E\u76D1\u542C", desc: "OneBot \u8FDE\u63A5\u53C2\u6570\u4E0E\u76D1\u542C\u540D\u5355\uFF1B\u8FDE\u63A5\u7C7B\u6539\u52A8\u9700\u91CD\u542F\u751F\u6548\u3002", group: "world:qqbot", prefix: "", topOnly: true },
   { id: "vision", title: "\u89C6\u89C9", desc: "\u8F85\u52A9\u89C6\u89C9\uFF08VLM\uFF09\uFF1A\u63A5\u6536\u56FE\u7247\u65F6\u7528\u89C6\u89C9\u6A21\u578B\u7406\u89E3\u3002", group: "world:qqbot", prefix: "worlds.qqbot.vision.", topOnly: false },
@@ -293,8 +693,10 @@ var panels = {};
 for (const m of MODULES) panels[m.id] = makePanel(m);
 panels["roster"] = rosterPanel;
 panels["events"] = eventsPanel;
-var bundle = { panels };
-var client_default = bundle;
+panels["pet"] = client_default.panels["pet"];
+panels["pet-voice"] = client_default.panels["voice"];
+var bundle2 = { panels };
+var client_default2 = bundle2;
 export {
-  client_default as default
+  client_default2 as default
 };

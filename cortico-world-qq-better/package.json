@@ -1,17 +1,18 @@
 {
-  "name": "cortico-world-qq-better",
+  "name": "cortico-world-qq-final",
   "version": "0.1.61",
-  "description": "Cortico World 扩展：QQ（OneBot v11 / NapCat）适配器，移植自 fat-fish qq_bot 运行时，支持反向与正向 WebSocket 双模式，并增量集成了 Cortico 内置能力（发送确认门、控制台、环境提示词、通知、可选视觉识别）。",
+  "description": "Cortico World 扩展：QQ（OneBot v11 / NapCat）适配器，并整合桌宠(cortico-world-desktop-pet, AGPL-3.0)与电脑操控(cortico-world-cua, AGPL-3.0)能力。",
   "type": "module",
   "main": "./src/index.ts",
-  "files": ["src", "dist", "README.md", "ENV_PROMPT.md", "asr_sidecar.py"],
-  "license": "MIT",
-  "keywords": ["cortico-world", "qq", "onebot", "napcat"],
+  "files": ["src", "dist", "web", "host", "README.md", "ENV_PROMPT.md", "asr_sidecar.py", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["cortico-world", "qq", "onebot", "napcat", "desktop-pet"],
   "cortico": {
     "kind": "world",
     "api": 5,
     "label": "QQ_bot",
-    "consoleClient": "dist/console.js"
+    "consoleClient": "dist/console.js",
+    "consoleStyle": "dist/console.css"
   },
   "engines": {
     "node": ">=22"
@@ -23,11 +24,16 @@
     "test": "node --test tests/normalize.test.ts tests/config.test.ts"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "koffi": "3.3.1",
+    "opencc-js": "^1.4.1",
+    "sherpa-onnx-node": "1.13.8",
+    "jpeg-js": "^0.4.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
+    "electron": "44.4.4",
     "typescript": "^5.7.0"
   }
 }

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, readdirSync, openSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { type BlobInput, type EventEnvelope, type Logger, type PromptDocDecl, type ToolDef, type World, type WorldConsoleDecl, type WorldHost, type WorldLamp, type WorldPanelDecl, type WorldStreamSocket } from 'cortico/core/types.ts';
+import { type BlobInput, type EventEnvelope, type Language, type Logger, type PromptDocDecl, type ToolDef, type World, type WorldConsoleDecl, type WorldHost, type WorldLamp, type WorldPanelDecl, type WorldStreamSocket } from 'cortico/core/types.ts';
 import { shortTime } from 'cortico/core/util.ts';
 import { OneBotDriver } from './driver.ts';
 import { QZonePoster, type QZoneConfig } from './qzone.ts';
@@ -35,6 +35,14 @@ import { EmotionEngine } from './emotion.ts';
 import { makeHistoryTools } from './history-tools.ts';
 import { Notebook } from './notebook.ts';
 import { festivalText } from './festival.ts';
+import type { DesktopPetConfigSection } from './desktop-pet/config.ts';
+import {
+  DESKTOP_PET_CONFIG_GROUP,
+  DESKTOP_PET_ASR_CONFIG_GROUP,
+  DESKTOP_PET_CUA_CONFIG_GROUP,
+  DESKTOP_PET_SOUND_CONFIG_GROUP,
+  DESKTOP_PET_PANEL_DECLS,
+} from './desktop-pet/config.ts';
 
 const SOURCE = 'qqbot';
 /** 合并转发节点里取不到昵称时的占位（对齐内置 qq 的 'QQ用户' 占位）。 */
@@ -122,7 +130,8 @@ export class QQWorld implements World {
   private qzone: QZonePoster | null = null;
   private emotion: EmotionEngine | null = null;
   private connected = false;
-  private proactivePersonaCache: string | null = null;
+  /** 桌宠（整合自 cortico-world-desktop-pet，AGPL-3.0）：由 worlds.qqbot.desktopPet.enabled 控制，默认关闭。 */
+  private pet: DesktopPetWorld | null = null;
   /** sendTo 因限速/防死循环而拦截时返回的字符串前缀，便于 qq_send 工具区分“已发送”与“被拦截”。 */
   private static readonly SEND_BLOCKED = '[send blocked] ';
   /** sendTo 因 NapCat 断连/图片获取失败等导致部分或全部段发送失败时返回的字符串前缀。 */
@@ -241,6 +250,46 @@ export class QQWorld implements World {
         .then((url) => { if (url) this.log.info('[asr-sidecar] 共享侧车已就绪', { url }); })
         .catch((e) => this.log.warn('[asr-sidecar] 预热失败（首次使用时将重试）', { err: String(e) }));
     }
+
+    // 桌宠（整合自 cortico-world-desktop-pet，AGPL-3.0）：由 worlds.qqbot.desktopPet.enabled 控制，默认关闭。
+    if (this.config.desktopPet.enabled) {
+      try {
+        const { DesktopPetWorld } = await import('./desktop-pet/world.ts');
+        this.pet = new DesktopPetWorld({
+          cfg: this.config.desktopPet,
+          timezone: this.config.timezone,
+          persist: (patch: any) => this.persistPet(patch),
+          runtimesRoot: () => join(this.dataDir, 'desktop-pet-runtimes'),
+          modelsDir: () => join(this.packageDir, 'desktop-pet'),
+          dataDir: this.dataDir,
+          botName: this.identity?.name ?? '桌宠',
+        });
+        // 桌宠交互事件：经 host.pushEvent 写入 EventStore，从而在控制台「事件流」面板可见；
+        // 用 origin=internal 标记，使其显示但不被 loop 当成外部用户输入触发 QQ 机器人自回复（自触发）。
+        // 同时保留 broadcastEvent 的 ws 推送（桌宠前端面板）。
+        const petHost: any = {
+          log: this.log.child('pet'),
+          pushEvent: (e: any) => {
+            try {
+              this.host?.pushEvent({ ...e, origin: 'internal' } as never, { trigger: 'piggyback' });
+            } catch { /* 事件流未连接时忽略 */ }
+            try { this.broadcastEvent(e as never); } catch { /* 前端 ws 推送 */ }
+            return Promise.resolve(e);
+          },
+        };
+        await this.pet.start(petHost);
+        this.log.info('[desktop-pet] 已随 QQ 启动');
+      } catch (e) {
+        this.log.error('[desktop-pet] 启动失败（已忽略，不影响 QQ 主功能）', { err: String(e) });
+        this.pet = null;
+      }
+    }
+  }
+
+  /** 桌宠持久化：把补丁重定位到 worlds.qqbot.desktopPet 子段下写回。 */
+  private persistPet(patch: any): void {
+    const host: any = this.host;
+    if (typeof host?.persist === 'function') host.persist({ desktopPet: patch });
   }
 
   /** 装载外号→QQ 记忆（qqbot-aliases.json）。 */
@@ -387,7 +436,7 @@ export class QQWorld implements World {
           const conv = this.convs.get(address);
           const label = conv?.label ?? idStr;
           const clock = eventClock(this.config.timezone);
-          const selfName = this.identity?.nickname ?? '肥鱼娘';
+          const selfName = this.identity?.nickname ?? '我';
           const bits: string[] = [];
           if (spoken) bits.push(`说了下面这句话：“${spoken}”`);
           if (atQQs.length) bits.push(`并 @了 ${atQQs.length} 人`);
@@ -488,7 +537,7 @@ export class QQWorld implements World {
       transcribeTimeout: (typeof this.config.asr.transcribeTimeout === 'number' && this.config.asr.transcribeTimeout > 0 ? this.config.asr.transcribeTimeout : 60000),
       ffmpegCandidates: buildFfmpegCandidates(this.config.asr.ffmpegPath, this.packageDir),
       voxcpmUrl: v.voxcpmUrl || '',
-      voxcpmVoiceDesc: v.voxcpmVoiceDesc || '可爱傲娇少女音',
+      voxcpmVoiceDesc: v.voxcpmVoiceDesc || '自然女声',
       voxcpmSpeed: typeof v.voxcpmSpeed === 'number' && v.voxcpmSpeed > 0 ? v.voxcpmSpeed : 1.0,
       voxcpmTimesteps: typeof v.voxcpmTimesteps === 'number' && v.voxcpmTimesteps > 0 ? v.voxcpmTimesteps : 10,
       voxcpmSeed: typeof v.voxcpmSeed === 'number' && v.voxcpmSeed >= 0 ? v.voxcpmSeed : 0,
@@ -499,17 +548,15 @@ export class QQWorld implements World {
    *  主动说话需要「贴着事实」，故温度压到 0.5（默认 0.9 太飘，容易编造）。 */
   private async chatCompletion(messages: ChatMsg[]): Promise<string | null> {
     const cfg = this.config.proactive;
-    return this.completeChat(cfg.endpoint, cfg.apiKeySecret, cfg.model, messages, { temperature: 0.5, maxTokens: 200 });
+    return this.completeChat(cfg.endpoint, cfg.apiKeySecret, cfg.model, messages, { temperature: 0.5, maxTokens: cfg.tokenLimit ?? 2000 });
   }
 
   /**
-   * 主动说话的系统提示词：复用 bot 的 Persona（ORIENTATION）+ 该会话已有的记忆，
+   * 主动说话的系统提示词：复用该会话已有的记忆，
    * 让主动冒泡的语气与内容跟正常对话保持一致，不再「割裂」。
    */
   private proactiveSystemPrompt(target: ProactiveTarget): string {
     const blocks: string[] = [];
-    const persona = this.loadPersonaPrompt();
-    if (persona) blocks.push(persona);
     // 最先钉死「现在在对谁说话」：否则模型会把长期笔记/别处记忆里的人名当成当前对象的称呼。
     const who = this.whoAmITalkingToBlock(target);
     if (who) blocks.push(who);
@@ -568,6 +615,17 @@ export class QQWorld implements World {
     const [kind, idStr] = String(target.address ?? '').split(':');
     const id = Number(idStr);
     if (!Number.isFinite(id)) return '';
+    if (this.config.proactive.withNickname === false) {
+      const youAre = this.config.whoAmITalkingTo
+        ? `[你正在和谁对话]\n${this.config.whoAmITalkingTo}\n`
+        : '';
+      const scope = kind === 'group' ? '你此刻正在这个 QQ 群里（公开群聊，在场的是群成员不是某一个人）' : '你此刻正在和对方私聊';
+      return (
+        youAre +
+        `${scope}。不要称呼对方的具体昵称或名字，直接用「你」即可，也不要在回复里写对方 QQ 号。\n` +
+        `如果你需要给对方发消息，调用发送工具时 address 字段固定为「${target.address}」。`
+      );
+    }
     const name = this.displayNameOf(target.address) || target.label || idStr;
     if (kind === 'group') {
       return (
@@ -622,34 +680,11 @@ export class QQWorld implements World {
     }
   }
 
-  /** 读取部署的 Persona 提示词（prompts/ORIENTATION.md），缓存一次。 */
-  private loadPersonaPrompt(): string {
-    if (this.proactivePersonaCache === null) {
-      this.proactivePersonaCache = '';
-      try {
-        const p = join(dirname(this.dataDir), 'prompts', 'ORIENTATION.md');
-        if (existsSync(p)) this.proactivePersonaCache = readFileSync(p, 'utf8').trim();
-      } catch {
-        /* 读不到就回退到 cfg.systemPrompt */
-      }
-    }
-    return this.proactivePersonaCache;
-  }
-
-  /** 解析主动说话/作息文本里用的自称，替代硬编码「本鱼」。
-   *  优先级：config.selfName 显式配置 > 从 ORIENTATION 人设推断 > 登录 QQ 昵称 > '我'。 */
+  /** 解析主动说话/作息文本里用的自称。
+   *  优先级：config.selfName 显式配置 > 登录 QQ 昵称 > '我'。 */
   private resolveSelfRef(): string {
     const explicit = (this.config.selfName ?? '').trim();
     if (explicit) return explicit;
-    const persona = this.loadPersonaPrompt();
-    if (persona) {
-      // 常见写法：昵称"小鱼"或"肥鱼娘" / 名字叫陈玥汐 / 你是DeepSeek娘，
-      const m =
-        persona.match(/昵称[“"『「]([^”"』」\s,，。、]+)[”"』」]/) ??
-        persona.match(/名字叫([^\s，。、,的叫]+)/) ??
-        persona.match(/你是([^\s，。、,]+?)[，,。]/);
-      if (m && m[1]) return m[1].trim();
-    }
     return this.identity?.nickname ?? '我';
   }
 
@@ -818,6 +853,10 @@ export class QQWorld implements World {
     this.proactive?.stop();
     this.qzone?.stop();
     this.emotion?.stop();
+    if (this.pet) {
+      try { await this.pet.stop(); } catch (e) { this.log?.warn('[desktop-pet] 停止异常', { err: String(e) }); }
+      this.pet = null;
+    }
     if (this.driver) await this.driver.stop();
     this.driver = null;
     this.connected = false;
@@ -851,7 +890,7 @@ export class QQWorld implements World {
       } else {
         this.log.warn('提醒缺少发送地址，已跳过发送', { id: r.id, text: r.text });
       }
-      // 回灌上下文：注明提醒到点已发出，并点明“做不做由本鱼自己看着办”，避免模型误以为必须执行/反复催。
+      // 回灌上下文：注明提醒到点已发出，并点明“做不做由我自己看着办”，避免模型误以为必须执行/反复催。
       try {
         this.host?.pushEvent({
           type: 'qq.message',
@@ -859,7 +898,7 @@ export class QQWorld implements World {
           source: SOURCE,
           origin: 'internal',
           text:
-            `我是肥鱼娘。我之前记的定时提醒「${r.text}」${r.scope ? `（${r.scope}）` : ''}到点了，我已经${addr ? '在该会话提醒了一声' : '准备提醒'}。` +
+            `我之前记的定时提醒「${r.text}」${r.scope ? `（${r.scope}）` : ''}到点了，我已经${addr ? '在该会话提醒了一声' : '准备提醒'}。` +
             `至于这件事到底做不做、怎么做，由我自己根据当下情况决定，不必硬照办，也不反复催。`,
           senderKey: addr,
           meta: { conv: addr, role: 'assistant', self: true },
@@ -1215,7 +1254,7 @@ export class QQWorld implements World {
       if (q.userId) conv.quotedSenderId = q.userId;
     }
 
-    const text = renderIncoming(segs, { timezone: this.config.timezone, selfId, replyText, replyRef });
+    let text = renderIncoming(segs, { timezone: this.config.timezone, selfId, replyText, replyRef });
     this.log.info('HANDLE_IN kind=' + conv.kind + ' text=' + JSON.stringify(text).slice(0, 40));
     // 情绪系统（移植自 fat-fish emotion）：感知 + /心情 命令/查询
     if (text && this.emotion) {
@@ -1511,6 +1550,7 @@ export class QQWorld implements World {
    * 则把模型生成的文本自动发往来源会话，避免“控制台有回复、QQ 收不到”。
    */
   onTurnEnded(): void {
+    this.pet?.onTurnEnded();
     const buf = this._tapBuf.trim();
     const pending = [...this._pendingReplyConvs];
     // 仅当“单一待回复会话且本轮未对其发送、且有文本”时兜底，避免多消息歧义或串轮误发。
@@ -2376,7 +2416,7 @@ export class QQWorld implements World {
     const cfg = this.config.voxcpmSidecar;
     let script = (cfg.script || '').trim();
     if (!script) {
-      // 相对探测：把扩展目录向上回溯 4 级（extensions/node_modules/cortico-world-qq-better → 工作区根），再按常见布局找脚本
+      // 相对探测：把扩展目录向上回溯 4 级（extensions/{node_modules,packages}/<扩展包> → 工作区根），再按常见布局找脚本
       const candidates = [
         join(this.packageDir, '..', '..', '..', '..', 'qq_bot', 'vox_tts_server.py'),
         join(this.packageDir, '..', '..', '..', '..', 'Fat-Fish', 'libs', 'qq_bot_runtime', 'vox_tts_server.py'),
@@ -2478,19 +2518,42 @@ export class QQWorld implements World {
     return { host: '127.0.0.1', port: this.config.asr.localPort || 8778 };
   }
 
+  /** 在 extensions/{node_modules,packages}/* 下按目录扫描 asr_sidecar.py。不写死包名，改名或换目录布局都能找到。 */
+  private scanAsrScript(): string {
+    let dir = this.packageDir;
+    for (let i = 0; i < 6; i += 1) {
+      const ext = join(dir, 'extensions');
+      for (const sub of ['node_modules', 'packages']) {
+        const base = join(ext, sub);
+        if (!existsSync(base)) continue;
+        let names: string[] = [];
+        try { names = readdirSync(base); } catch { continue; }
+        for (const name of names) {
+          if (name.startsWith('.')) continue;
+          const c = join(base, name, 'asr_sidecar.py');
+          if (existsSync(c)) return c;
+        }
+      }
+      const up = dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+    return '';
+  }
+
   /** 探测本地 ASR 侧车依赖：python 解释器 + asr_sidecar.py + 模型目录。不写死任何机器路径：全部由 asr.local* 配置与环境变量决定。 */
   private resolveAsrSidecar(): { python: string; script: string; modelPath: string; engine: string } | null {
     const asr = this.config.asr;
     // 框架有时把 packageDir 指向 bots/<bot> 而非扩展目录，故回退多个"包相对"候选位置找脚本（不含任何绝对机器路径）
     const scriptCands = [
       join(this.packageDir, 'asr_sidecar.py'),
-      join(this.packageDir, '..', '..', 'extensions', 'node_modules', 'cortico-world-qq-better', 'asr_sidecar.py'),
-      join(this.packageDir, '..', '..', 'extensions', 'node_modules', 'cortico-world-qq-better', 'src', 'asr_sidecar.py'),
+      join(this.packageDir, 'src', 'asr_sidecar.py'),
     ];
     let script = '';
     for (const c of scriptCands) {
       if (existsSync(c)) { script = c; break; }
     }
+    if (!script) script = this.scanAsrScript();
     if (!script) {
       this.log.warn('[asr-sidecar] 找不到 asr_sidecar.py，已尝试：' + scriptCands.join(' ; '));
       return null;
@@ -2989,7 +3052,7 @@ export class QQWorld implements World {
           // 唤醒回合（无回声），否则 bot 下一轮完全不记得是自己戳的，别人回"别戳我"时也接不上。
           try {
             const whoLabel = userRaw || '对话对象';
-            const selfName = this.identity?.nickname ?? '肥鱼娘';
+            const selfName = this.identity?.nickname ?? '我';
             const conv = this.convs.get(to);
             const label = conv?.label ?? (target.kind === 'group' ? String(target.id) : String(userId));
             const text = target.kind === 'group'
@@ -3644,16 +3707,18 @@ export class QQWorld implements World {
       },
     };
 
-    return [send, confirm, viewImage, stickerStats, proactiveStatus, proactiveTrigger, qzonePost, qzoneDelete, qzoneReply, qzoneFeeds, qzoneStatus, poke, reminderAdd, reminderList, reminderCancel, affinityAdjust, affinityGet, affinityList, aliasSet, aliasForget, aliasList, noteSave, noteList, noteGet, noteForget, adminRecall, adminAtAll, adminNotice, adminJoinList, adminJoinApprove, adminJoinReject, adminTitle, adminBan, adminBanAll, adminKick, voicecall, ...makeHistoryTools({
+    const tools: ToolDef[] = [send, confirm, viewImage, stickerStats, proactiveStatus, proactiveTrigger, qzonePost, qzoneDelete, qzoneReply, qzoneFeeds, qzoneStatus, poke, reminderAdd, reminderList, reminderCancel, affinityAdjust, affinityGet, affinityList, aliasSet, aliasForget, aliasList, noteSave, noteList, noteGet, noteForget, adminRecall, adminAtAll, adminNotice, adminJoinList, adminJoinApprove, adminJoinReject, adminTitle, adminBan, adminBanAll, adminKick, voicecall, ...makeHistoryTools({
       getHost: () => this.host,
       sourceId: SOURCE,
       timezone: this.config.timezone,
       convLabel: (a) => this.convLabel(a),
     })];
+    if (this.pet) tools.push(...this.pet.tools());
+    return tools;
   }
 
   // ---- 控制台 ----
-  console(): WorldConsoleDecl {
+  console(language: Language = 'zh'): WorldConsoleDecl {
     const lamps: WorldLamp[] = [
       {
         label: 'NapCat 连接',
@@ -3728,10 +3793,11 @@ export class QQWorld implements World {
         description: m.description,
         getMethods: ['config', ...(m.status ? [m.status] : []), ...(m.extra === 'asr' ? ['downloadAsrModel'] : [])],
       })),
+      ...DESKTOP_PET_PANEL_DECLS,
     ];
     return {
       label: 'QQ 群聊',
-      lamps,
+      lamps: [...lamps, ...(this.pet ? this.pet.console(language).lamps : [])],
       badges: [
         { label: '自身 QQ', value: this.identity?.selfId ?? '-', tone: 'on' },
         { label: '监听会话', value: this.convs.size, tone: 'on' },
@@ -3745,8 +3811,15 @@ export class QQWorld implements World {
         { label: '好感度', value: this.affinity?.count() ?? 0, tone: this.config.affinity.enabled ? 'on' : 'plain' },
       ],
       panels,
-      invoke: (panel, method, args) => this.invoke(panel, method, args),
-      stream: (panel, socket) => this.stream(panel, socket),
+      invoke: (panel, method, args) => {
+        if ((panel === 'pet' || panel === 'pet-voice') && this.pet) return this.pet.invokeConsole(panel, method, args);
+        if ((panel === 'pet' || panel === 'pet-voice') && !this.pet) return { enabled: false, message: '桌宠未启用：在「QQ 配置」页打开「桌宠」开关并重启后即可使用。' };
+        return this.invoke(panel, method, args);
+      },
+      stream: (panel, socket) => {
+        if (panel === 'pet-voice' && this.pet) { this.pet.streamConsole(panel, socket); return; }
+        this.stream(panel, socket);
+      },
       promptDocs: [
         {
           key: 'worlds.qqbot.envPrompt',
@@ -3770,8 +3843,10 @@ export class QQWorld implements World {
             { name: 'qq.routine', description: 'AI 作息说明（当前时段、是否在线/睡眠/午休，以及主动冒泡规则）。' },
           ],
         },
+        ...(this.pet ? this.pet.console(language).promptDocs : []),
       ],
-      config: [QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_ASR_GROUP, QQ_CALL_GROUP, QQ_VOXCPM_SIDECAR_GROUP],
+      links: this.pet ? this.pet.console(language).links : [],
+      config: [QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_ASR_GROUP, QQ_CALL_GROUP, QQ_VOXCPM_SIDECAR_GROUP, DESKTOP_PET_CONFIG_GROUP, DESKTOP_PET_ASR_CONFIG_GROUP, DESKTOP_PET_CUA_CONFIG_GROUP, DESKTOP_PET_SOUND_CONFIG_GROUP],
     };
   }
 
@@ -4025,9 +4100,11 @@ export class QQWorld implements World {
     }
     this.eventSockets.add(socket);
     socket.onClose(() => this.eventSockets.delete(socket));
-    // 先回放最近 20 条
+    // 先回放最近 20 条；同时纳入桌宠来源，使桌宠交互也出现在 QQ 控制台事件流
     if (this.host) {
-      const recent = this.host.store.range({ source: SOURCE, limit: 20 }).reverse();
+      const qq = this.host.store.range({ source: SOURCE, limit: 20 });
+      const pet = this.host.store.range({ source: 'desktop-pet', limit: 20 });
+      const recent = [...qq, ...pet].sort((a, b) => a.cursor - b.cursor).reverse().slice(0, 20);
       for (const e of recent) socket.send(JSON.stringify({ ts: e.ts, type: e.type, senderKey: e.senderKey, text: e.text }));
     }
   }
