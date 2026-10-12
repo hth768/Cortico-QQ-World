@@ -3,8 +3,6 @@ import type { WorldSection } from 'cortico/world.ts';
 import type { QZoneConfig } from './qzone.ts';
 import type { RoutineConfig } from './proactive.ts';
 import { voiceProviderIds } from './voice.ts';
-import type { DesktopPetConfigSection } from './desktop-pet/config.ts';
-import { DESKTOP_PET_DEFAULTS } from './desktop-pet/config.ts';
 
 /** fat-fish qq_bot 的关键参数 + Cortico 内置 world 的可选项，统一为一份配置。 */
 /** 语音通话（模拟）配置：基于语音消息的"打电话"会话，支持即时听说与流式语音 */
@@ -33,10 +31,10 @@ export interface QQCallConfig {
   loadingText: string;
   /** 接听前等待本地语音模型初始化完成的最长秒数；0=不等待（未就绪直接按未就绪处理）。超时仍未就绪则发 notReadyText 婉拒。 */
   initTimeoutSec: number;
-  /** 通话模式：simulated=基于语音消息的模拟（OneBot，默认，零风险，无需动真实 QQ 客户端）；system=系统级真接电话（动真实 QQ 客户端+系统音频桥，受 answerMethod 控制）。OneBot/NapCat 拿不到系统级电话的来电事件，system 模式需配合 LiteLoader/CUA 接听与音频桥使用。 */
+  /** 通话模式：simulated=基于语音消息的模拟（OneBot，默认，零风险，无需动真实 QQ 客户端）；system=系统级真接电话（动真实 QQ 客户端+系统音频桥，受 answerMethod 控制）。OneBot/NapCat 拿不到系统级电话的来电事件，system 模式需配合 LiteLoader 接听与音频桥使用。 */
   mode: 'simulated' | 'system';
-  /** 系统级真接电话的接听手段（仅 mode=system 生效）：liteloader=用 LiteLoaderQQNT 插件监听来电并自动接听+切虚拟麦克风；cua=用桌宠(cortico-world-cua)视觉识别来电弹窗点击接听；auto=优先 liteloader（装了就用），否则退化 cua。 */
-  answerMethod: 'liteloader' | 'cua' | 'auto';
+  /** 系统级真接电话的接听手段（仅 mode=system 生效）：liteloader=用 LiteLoaderQQNT 插件监听来电并自动接听+切虚拟麦克风。 */
+  answerMethod: 'liteloader';
   /** 系统级真接电话的音频桥服务地址（audio_bridge_poc/call_bridge.py 的 HTTP 地址）。mode=system 时 TTS 经它喂给 CABLE，对方声音经它从 WASAPI Loopback 抓取。 */
   bridgeUrl: string;
   /** 音频桥脚本绝对路径（call_bridge.py）。留空则运行时按"扩展目录向上回溯"在 audio_bridge_poc/ 等常见布局里自动找；也可显式指定。 */
@@ -315,8 +313,6 @@ export interface QQWorldConfig {
    * 开启后，qq_send 对 private:<QQ> 目标跳过私聊监听名单限制，可向任意群成员发起私聊分流。默认 true。
    */
   allowPrivateRedirect?: boolean;
-  /** 桌宠（整合自 cortico-world-desktop-pet，AGPL-3.0）：默认关闭，由 enabled 开关控制。 */
-  desktopPet: DesktopPetConfigSection;
 }
 
 
@@ -485,7 +481,7 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     loadingText: '喂？稍等，我正在接通…',
     initTimeoutSec: 60,
     mode: 'simulated',
-    answerMethod: 'auto',
+    answerMethod: 'liteloader',
     bridgeUrl: 'http://127.0.0.1:8799',
     bridgeScript: '',
     bridgePython: '',
@@ -503,7 +499,6 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     allowSelfKick: false,
     kickRejectRejoin: true,
   },
-  desktopPet: { ...DESKTOP_PET_DEFAULTS },
 };
 
 export const QQ_SECRETS = ['QQ_ACCESS_TOKEN', 'OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'VOICE_API_KEY'];
@@ -673,11 +668,11 @@ export const QQ_CALL_GROUP: ConfigGroup = {
     'worlds.qqbot.call.initTimeoutSec': { type: 'integer', title: '接听前等待(秒)', minimum: 0, maximum: 1800, 'x-hot': true, description: '来电后若语音模型未就绪，等待其初始化完成再接听的最长秒数。0=不等待（未就绪直接婉拒）。超时仍未就绪则发"未就绪文案"。' },
     'worlds.qqbot.call.mode': {
       type: 'string', title: '通话模式', enum: ['simulated', 'system'], 'x-hot': true,
-      description: 'simulated=基于语音消息的"打电话"会话模拟（OneBot，零风险，默认）；system=系统级真接电话（动真实 QQ 客户端+系统音频桥，需配合 LiteLoader/CUA 自动接听与音频桥，受 answerMethod 控制）。OneBot/NapCat 拿不到系统级电话的来电事件，system 模式由外部音频桥服务驱动。',
+      description: 'simulated=基于语音消息的"打电话"会话模拟（OneBot，零风险，默认）；system=系统级真接电话（动真实 QQ 客户端+系统音频桥，需配合 LiteLoader 自动接听与音频桥，受 answerMethod 控制）。OneBot/NapCat 拿不到系统级电话的来电事件，system 模式由外部音频桥服务驱动。',
     },
     'worlds.qqbot.call.answerMethod': {
-      type: 'string', title: '系统级接听手段', enum: ['liteloader', 'cua', 'auto'], 'x-hot': true,
-      description: '仅 mode=system 生效：liteloader=用 LiteLoaderQQNT 插件监听来电并自动接听（再切虚拟麦克风）；cua=用桌宠(cortico-world-cua)视觉识别来电弹窗点击接听；auto=优先 liteloader，没装则退化 cua。两种方式都会把 Windows 默认通信设备切到 CABLE Output，让 QQ 通话采集 AI 的 TTS 声音。',
+      type: 'string', title: '系统级接听手段', enum: ['liteloader'], 'x-hot': true,
+      description: '仅 mode=system 生效：liteloader=用 LiteLoaderQQNT 插件监听来电并自动接听（再切虚拟麦克风）。会把 Windows 默认通信设备切到 CABLE Output，让 QQ 通话采集 AI 的 TTS 声音。',
     },
     'worlds.qqbot.call.bridgeUrl': {
       type: 'string', title: '音频桥地址', 'x-hot': true,
@@ -936,7 +931,7 @@ export function normalizeConfig(raw: QQConfigSection): QQWorldConfig {
   if (typeof ca.loadingText !== 'string') ca.loadingText = QQ_DEFAULTS.call.loadingText;
   if (typeof ca.initTimeoutSec !== 'number' || (ca.initTimeoutSec as number) < 0) ca.initTimeoutSec = QQ_DEFAULTS.call.initTimeoutSec;
   if (ca.mode !== 'simulated' && ca.mode !== 'system') ca.mode = 'simulated';
-  if (!['liteloader', 'cua', 'auto'].includes(ca.answerMethod as string)) ca.answerMethod = 'auto';
+  if (ca.answerMethod !== 'liteloader') ca.answerMethod = 'liteloader';
   if (typeof ca.bridgeUrl !== 'string' || !ca.bridgeUrl) ca.bridgeUrl = 'http://127.0.0.1:8799';
   if (typeof ca.bridgeScript !== 'string') ca.bridgeScript = '';
   if (typeof ca.bridgePython !== 'string') ca.bridgePython = '';
@@ -961,11 +956,6 @@ export function normalizeConfig(raw: QQConfigSection): QQWorldConfig {
   if (typeof adm.kickRejectRejoin !== 'boolean') adm.kickRejectRejoin = true;
   c.admin = adm as QQWorldConfig['admin'];
   if (typeof c.allowPrivateRedirect !== 'boolean') c.allowPrivateRedirect = true;
-  // 桌宠整合段：以 DESKTOP_PET_DEFAULTS 兜底，再用用户配置覆盖；enabled 默认 false。
-  const userPet = (c.desktopPet && typeof c.desktopPet === 'object' ? c.desktopPet : {}) as Record<string, unknown>;
-  const pet = { ...DESKTOP_PET_DEFAULTS, ...userPet } as Record<string, unknown>;
-  if (typeof pet.enabled !== 'boolean') pet.enabled = false;
-  c.desktopPet = pet as DesktopPetConfigSection;
   return c;
 }
 

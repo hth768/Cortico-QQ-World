@@ -7,7 +7,7 @@ import { OneBotDriver } from './driver.ts';
 import { QZonePoster, type QZoneConfig } from './qzone.ts';
 import { QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_CALL_GROUP, QQ_ASR_GROUP, QQ_DEFAULTS, normalizeConfig, toIds, type QQConfigSection, type QQWorldConfig } from './config.ts';
 import { transcribeRecord, synthesizeVoice, judgeVoiceWish, checkVoiceDeps, voiceReady, splitIntoSentences, type RuntimeVoiceCfg } from './voice.ts';
-// 「听」能力模块化：切句/并句/识别契约与 cortico-world-desktop-pet 完全对齐，未来合并桌宠时共用一份。
+// 「听」能力模块化：切句/并句/识别契约与通用识别契约对齐。
 import { AudioListener } from './asr/listener.ts';
 import { HttpRecognizer } from './asr/recognizer.ts';
 import { isAbsolute, join, dirname } from 'node:path';
@@ -35,14 +35,6 @@ import { EmotionEngine } from './emotion.ts';
 import { makeHistoryTools } from './history-tools.ts';
 import { Notebook } from './notebook.ts';
 import { festivalText } from './festival.ts';
-import type { DesktopPetConfigSection } from './desktop-pet/config.ts';
-import {
-  DESKTOP_PET_CONFIG_GROUP,
-  DESKTOP_PET_ASR_CONFIG_GROUP,
-  DESKTOP_PET_CUA_CONFIG_GROUP,
-  DESKTOP_PET_SOUND_CONFIG_GROUP,
-  DESKTOP_PET_PANEL_DECLS,
-} from './desktop-pet/config.ts';
 
 const SOURCE = 'qqbot';
 /** 合并转发节点里取不到昵称时的占位（对齐内置 qq 的 'QQ用户' 占位）。 */
@@ -126,8 +118,6 @@ export class QQWorld implements World {
   private qzone: QZonePoster | null = null;
   private emotion: EmotionEngine | null = null;
   private connected = false;
-  /** 桌宠（整合自 cortico-world-desktop-pet，AGPL-3.0）：由 worlds.qqbot.desktopPet.enabled 控制，默认关闭。 */
-  private pet: DesktopPetWorld | null = null;
   /** sendTo 因限速/防死循环而拦截时返回的字符串前缀，便于 qq_send 工具区分“已发送”与“被拦截”。 */
   private static readonly SEND_BLOCKED = '[send blocked] ';
   /** sendTo 因 NapCat 断连/图片获取失败等导致部分或全部段发送失败时返回的字符串前缀。 */
@@ -246,46 +236,6 @@ export class QQWorld implements World {
         .then((url) => { if (url) this.log.info('[asr-sidecar] 共享侧车已就绪', { url }); })
         .catch((e) => this.log.warn('[asr-sidecar] 预热失败（首次使用时将重试）', { err: String(e) }));
     }
-
-    // 桌宠（整合自 cortico-world-desktop-pet，AGPL-3.0）：由 worlds.qqbot.desktopPet.enabled 控制，默认关闭。
-    if (this.config.desktopPet.enabled) {
-      try {
-        const { DesktopPetWorld } = await import('./desktop-pet/world.ts');
-        this.pet = new DesktopPetWorld({
-          cfg: this.config.desktopPet,
-          timezone: this.config.timezone,
-          persist: (patch: any) => this.persistPet(patch),
-          runtimesRoot: () => join(this.dataDir, 'desktop-pet-runtimes'),
-          modelsDir: () => join(this.packageDir, 'desktop-pet'),
-          dataDir: this.dataDir,
-          botName: this.identity?.name ?? '桌宠',
-        });
-        // 桌宠交互事件：经 host.pushEvent 写入 EventStore，从而在控制台「事件流」面板可见；
-        // 用 origin=internal 标记，使其显示但不被 loop 当成外部用户输入触发 QQ 机器人自回复（自触发）。
-        // 同时保留 broadcastEvent 的 ws 推送（桌宠前端面板）。
-        const petHost: any = {
-          log: this.log.child('pet'),
-          pushEvent: (e: any) => {
-            try {
-              this.host?.pushEvent({ ...e, origin: 'internal' } as never, { trigger: 'piggyback' });
-            } catch { /* 事件流未连接时忽略 */ }
-            try { this.broadcastEvent(e as never); } catch { /* 前端 ws 推送 */ }
-            return Promise.resolve(e);
-          },
-        };
-        await this.pet.start(petHost);
-        this.log.info('[desktop-pet] 已随 QQ 启动');
-      } catch (e) {
-        this.log.error('[desktop-pet] 启动失败（已忽略，不影响 QQ 主功能）', { err: String(e) });
-        this.pet = null;
-      }
-    }
-  }
-
-  /** 桌宠持久化：把补丁重定位到 worlds.qqbot.desktopPet 子段下写回。 */
-  private persistPet(patch: any): void {
-    const host: any = this.host;
-    if (typeof host?.persist === 'function') host.persist({ desktopPet: patch });
   }
 
   /** 装载外号→QQ 记忆（qqbot-aliases.json）。 */
@@ -849,10 +799,6 @@ export class QQWorld implements World {
     this.proactive?.stop();
     this.qzone?.stop();
     this.emotion?.stop();
-    if (this.pet) {
-      try { await this.pet.stop(); } catch (e) { this.log?.warn('[desktop-pet] 停止异常', { err: String(e) }); }
-      this.pet = null;
-    }
     if (this.driver) await this.driver.stop();
     this.driver = null;
     this.connected = false;
@@ -1546,7 +1492,6 @@ export class QQWorld implements World {
    * 则把模型生成的文本自动发往来源会话，避免“控制台有回复、QQ 收不到”。
    */
   onTurnEnded(): void {
-    this.pet?.onTurnEnded();
     const buf = this._tapBuf.trim();
     const pending = [...this._pendingReplyConvs];
     // 仅当“单一待回复会话且本轮未对其发送、且有文本”时兜底，避免多消息歧义或串轮误发。
@@ -3593,7 +3538,6 @@ export class QQWorld implements World {
       timezone: this.config.timezone,
       convLabel: (a) => this.convLabel(a),
     })];
-    if (this.pet) tools.push(...this.pet.tools());
     return tools;
   }
 
@@ -3668,11 +3612,10 @@ export class QQWorld implements World {
         description: m.description,
         getMethods: ['config', ...(m.status ? [m.status] : []), ...(m.extra === 'asr' ? ['downloadAsrModel'] : [])],
       })),
-      ...DESKTOP_PET_PANEL_DECLS,
     ];
     return {
       label: 'QQ 群聊',
-      lamps: [...lamps, ...(this.pet ? this.pet.console(language).lamps : [])],
+      lamps: [...lamps],
       badges: [
         { label: '自身 QQ', value: this.identity?.selfId ?? '-', tone: 'on' },
         { label: '监听会话', value: this.convs.size, tone: 'on' },
@@ -3687,12 +3630,9 @@ export class QQWorld implements World {
       ],
       panels,
       invoke: (panel, method, args) => {
-        if ((panel === 'pet' || panel === 'pet-voice') && this.pet) return this.pet.invokeConsole(panel, method, args);
-        if ((panel === 'pet' || panel === 'pet-voice') && !this.pet) return { enabled: false, message: '桌宠未启用：在「QQ 配置」页打开「桌宠」开关并重启后即可使用。' };
         return this.invoke(panel, method, args);
       },
       stream: (panel, socket) => {
-        if (panel === 'pet-voice' && this.pet) { this.pet.streamConsole(panel, socket); return; }
         this.stream(panel, socket);
       },
       promptDocs: [
@@ -3718,10 +3658,9 @@ export class QQWorld implements World {
             { name: 'qq.routine', description: 'AI 作息说明（当前时段、是否在线/睡眠/午休，以及主动冒泡规则）。' },
           ],
         },
-        ...(this.pet ? this.pet.console(language).promptDocs : []),
       ],
-      links: this.pet ? this.pet.console(language).links : [],
-      config: [QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_ASR_GROUP, QQ_CALL_GROUP, DESKTOP_PET_CONFIG_GROUP, DESKTOP_PET_ASR_CONFIG_GROUP, DESKTOP_PET_CUA_CONFIG_GROUP, DESKTOP_PET_SOUND_CONFIG_GROUP],
+      links: [],
+      config: [QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_ASR_GROUP, QQ_CALL_GROUP],
     };
   }
 
@@ -3946,11 +3885,10 @@ export class QQWorld implements World {
     }
     this.eventSockets.add(socket);
     socket.onClose(() => this.eventSockets.delete(socket));
-    // 先回放最近 20 条；同时纳入桌宠来源，使桌宠交互也出现在 QQ 控制台事件流
+    // 先回放最近 20 条
     if (this.host) {
       const qq = this.host.store.range({ source: SOURCE, limit: 20 });
-      const pet = this.host.store.range({ source: 'desktop-pet', limit: 20 });
-      const recent = [...qq, ...pet].sort((a, b) => a.cursor - b.cursor).reverse().slice(0, 20);
+      const recent = qq.sort((a, b) => a.cursor - b.cursor).reverse().slice(0, 20);
       for (const e of recent) socket.send(JSON.stringify({ ts: e.ts, type: e.type, senderKey: e.senderKey, text: e.text }));
     }
   }

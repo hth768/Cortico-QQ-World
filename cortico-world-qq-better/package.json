@@ -1,12 +1,12 @@
 {
   "name": "cortico-world-qq-final",
   "version": "0.1.61",
-  "description": "Cortico World 扩展：QQ（OneBot v11 / NapCat）适配器，并整合桌宠(cortico-world-desktop-pet, AGPL-3.0)与电脑操控(cortico-world-cua, AGPL-3.0)能力。",
+  "description": "Cortico World 扩展：QQ（OneBot v11 / NapCat）适配器。",
   "type": "module",
   "main": "./src/index.ts",
-  "files": ["src", "dist", "web", "host", "README.md", "ENV_PROMPT.md", "asr_sidecar.py", "LICENSE", "THIRD_PARTY_NOTICES.md"],
-  "license": "AGPL-3.0-or-later",
-  "keywords": ["cortico-world", "qq", "onebot", "napcat", "desktop-pet"],
+  "files": ["src", "dist", "README.md", "ENV_PROMPT.md", "asr_sidecar.py", "LICENSE"],
+  "license": "MIT",
+  "keywords": ["cortico-world", "qq", "onebot", "napcat"],
   "cortico": {
     "kind": "world",
     "api": 5,
@@ -24,16 +24,11 @@
     "test": "node --test tests/normalize.test.ts tests/config.test.ts"
   },
   "dependencies": {
-    "ws": "^8.18.0",
-    "koffi": "3.3.1",
-    "opencc-js": "^1.4.1",
-    "sherpa-onnx-node": "1.13.8",
-    "jpeg-js": "^0.4.4"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
-    "electron": "44.4.4",
     "typescript": "^5.7.0"
   }
 }
