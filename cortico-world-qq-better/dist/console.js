@@ -1,4 +1,4 @@
-// Cortico-QQ-World/cortico-world-qq-better/src/desktop-pet/console/client.ts
+// src/desktop-pet/console/client.ts
 var MODES = { hold: "\u6309\u4F4F\u8BF4\u8BDD\u952E\u65F6\u6536\u97F3", toggle: "\u7528\u8BF4\u8BDD\u952E\u5F00\u5173\u6536\u97F3", always: "\u4E00\u76F4\u6536\u97F3" };
 var CODE_KEYS = {
   ControlLeft: "LeftCtrl",
@@ -398,7 +398,7 @@ var voicePanel = {
 var bundle = { panels: { pet: petPanel, voice: voicePanel } };
 var client_default = bundle;
 
-// Cortico-QQ-World/cortico-world-qq-better/src/console/client.ts
+// src/console/client.ts
 var MODULES = [
   { id: "general", title: "\u8FDE\u63A5\u4E0E\u76D1\u542C", desc: "OneBot \u8FDE\u63A5\u53C2\u6570\u4E0E\u76D1\u542C\u540D\u5355\uFF1B\u8FDE\u63A5\u7C7B\u6539\u52A8\u9700\u91CD\u542F\u751F\u6548\u3002", group: "world:qqbot", prefix: "", topOnly: true },
   { id: "vision", title: "\u89C6\u89C9", desc: "\u8F85\u52A9\u89C6\u89C9\uFF08VLM\uFF09\uFF1A\u63A5\u6536\u56FE\u7247\u65F6\u7528\u89C6\u89C9\u6A21\u578B\u7406\u89E3\u3002", group: "world:qqbot", prefix: "worlds.qqbot.vision.", topOnly: false },
@@ -414,8 +414,7 @@ var MODULES = [
   { id: "admin", title: "\u7FA4\u7BA1\u7406\u5458", desc: "\u64A4\u56DE/@\u5168\u4F53/\u901A\u77E5/\u5BA1\u6838\u8FDB\u7FA4/\u5934\u8854/\u7981\u8A00/\u8E22\u4EBA\u3002", group: "world:qqbot", prefix: "worlds.qqbot.admin.", topOnly: false },
   { id: "voice", title: "\u8BED\u97F3\u6536\u53D1", desc: "\u5BF9\u65B9\u8BF4\u8BDD\u8F6C\u6587\u5B57\u3001AI \u56DE\u590D\u8F6C\u8BED\u97F3\u3002\u53EF\u6574\u4F53\u5F00\u5173\u3002", group: "world:qqbot-voice", prefix: "", topOnly: false, status: "getVoiceState" },
   { id: "asr", title: "\u8BED\u97F3\u6A21\u578B", desc: "ASR \u5F15\u64CE\u4E0E\u6A21\u578B\u4E0B\u8F7D\uFF1Asherpa-onnx int8 \u91CF\u5316\u7248\u7EA6 228MB\u3002", group: "world:qqbot-asr", prefix: "", topOnly: false, status: "getAsrModelState", extra: "asr" },
-  { id: "call", title: "\u8BED\u97F3\u901A\u8BDD", desc: "\u89E6\u53D1\u8BCD\u8FDB\u5165\u8BED\u97F3\u901A\u8BDD\u4F1A\u8BDD\uFF08\u6A21\u62DF\u63A5\u542C\uFF09\u3002\u53EF\u6574\u4F53\u5F00\u5173\u3002", group: "world:qqbot-call", prefix: "", topOnly: false, status: "getCallState" },
-  { id: "voxcpm", title: "VoxCPM \u4FA7\u8F66", desc: "TTS \u4FA7\u8F66\u5B50\u8FDB\u7A0B\uFF08\u8BED\u97F3\u5408\u6210\uFF09\u3002\u53EF\u5F00\u5173\u81EA\u62C9\u8D77\u3002", group: "world:qqbot-voxcpm-sidecar", prefix: "", topOnly: false, status: "getVoxcpmState" }
+  { id: "call", title: "\u8BED\u97F3\u901A\u8BDD", desc: "\u89E6\u53D1\u8BCD\u8FDB\u5165\u8BED\u97F3\u901A\u8BDD\u4F1A\u8BDD\uFF08\u6A21\u62DF\u63A5\u542C\uFF09\u3002\u53EF\u6574\u4F53\u5F00\u5173\u3002", group: "world:qqbot-call", prefix: "", topOnly: false, status: "getCallState" }
 ];
 function isLongText(key, def) {
   if (def.type !== "string") return false;
