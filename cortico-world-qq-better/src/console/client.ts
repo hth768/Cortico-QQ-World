@@ -36,7 +36,6 @@ const MODULES: ModuleSpec[] = [
   { id: 'voice', title: '语音收发', desc: '对方说话转文字、AI 回复转语音。可整体开关。', group: 'world:qqbot-voice', prefix: '', topOnly: false, status: 'getVoiceState' },
   { id: 'asr', title: '语音模型', desc: 'ASR 引擎与模型下载：sherpa-onnx int8 量化版约 228MB。', group: 'world:qqbot-asr', prefix: '', topOnly: false, status: 'getAsrModelState', extra: 'asr' },
   { id: 'call', title: '语音通话', desc: '触发词进入语音通话会话（模拟接听）。可整体开关。', group: 'world:qqbot-call', prefix: '', topOnly: false, status: 'getCallState' },
-  { id: 'voxcpm', title: 'VoxCPM 侧车', desc: 'TTS 侧车子进程（语音合成）。可开关自拉起。', group: 'world:qqbot-voxcpm-sidecar', prefix: '', topOnly: false, status: 'getVoxcpmState' },
 ];
 
 function isLongText(key: string, def: FieldDef): boolean {

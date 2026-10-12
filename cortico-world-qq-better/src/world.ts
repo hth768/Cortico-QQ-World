@@ -5,7 +5,7 @@ import { type BlobInput, type EventEnvelope, type Language, type Logger, type Pr
 import { shortTime } from 'cortico/core/util.ts';
 import { OneBotDriver } from './driver.ts';
 import { QZonePoster, type QZoneConfig } from './qzone.ts';
-import { QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_CALL_GROUP, QQ_ASR_GROUP, QQ_VOXCPM_SIDECAR_GROUP, QQ_DEFAULTS, normalizeConfig, toIds, type QQConfigSection, type QQWorldConfig } from './config.ts';
+import { QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_CALL_GROUP, QQ_ASR_GROUP, QQ_DEFAULTS, normalizeConfig, toIds, type QQConfigSection, type QQWorldConfig } from './config.ts';
 import { transcribeRecord, synthesizeVoice, judgeVoiceWish, checkVoiceDeps, voiceReady, splitIntoSentences, type RuntimeVoiceCfg } from './voice.ts';
 // 「听」能力模块化：切句/并句/识别契约与 cortico-world-desktop-pet 完全对齐，未来合并桌宠时共用一份。
 import { AudioListener } from './asr/listener.ts';
@@ -106,10 +106,6 @@ export class QQWorld implements World {
   /** 接通中被主动取消（收到挂断词）的标记 */
   private pendingAbort = new Map<string, boolean>();
   private callIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** 由本扩展拉起的 voxcpm 侧车子进程（provider=voxcpm 且启用自拉起时）；detached，Cortico 退出后可能仍存活 */
-  private sidecarProc: ChildProcess | null = null;
-  /** 上次拉起侧车的时间戳（用于日志/排查） */
-  private sidecarLaunchedAt = 0;
   /** 由本扩展拉起的本地 ASR 侧车子进程（asr.mode=local 时）；detached，Cortico 退出后可能仍存活 */
   private asrSidecar: ChildProcess | null = null;
   /** 由本扩展拉起的音频桥子进程(call_bridge.py)；detached，崩溃后可被 ensureAudioBridge 自愈拉起 */
@@ -1986,12 +1982,8 @@ export class QQWorld implements World {
     this.pendingCall.add(address);
     this.pendingAbort.delete(address);
     await this.sendTo(address, this.config.call.loadingText || '喂？稍等，我正在接通…');
-    // 若启用侧车自拉起且当前 TTS 引擎确为 voxcpm，才把 vox_tts_server.py 拉起来（返回 true 表示本次新拉起，需给更长的模型加载时间）
+    // 接通等待：等本地语音模型（若用本地 TTS/ASR）初始化完成后再接听
     let waitSec = this.config.call.initTimeoutSec;
-    if (this.config.voxcpmSidecar.enabled && this.voiceRuntime().provider === 'voxcpm') {
-      const launched = await this.ensureSidecarLaunched();
-      if (launched) waitSec = Math.max(waitSec, this.config.voxcpmSidecar.startupTimeoutSec);
-    }
     if (waitSec <= 0) {
       // 配置为不等待：立即按"未就绪"处理（婉拒）
       this.pendingCall.delete(address);
@@ -2389,17 +2381,7 @@ export class QQWorld implements World {
     }
   }
 
-  /** 解析 voice.voxcpmUrl 的 host/port（供侧车拉起时对齐监听地址）。 */
-  private voxcpmHostPort(): { host: string; port: number } {
-    try {
-      const u = new URL(this.config.voice.voxcpmUrl || 'http://127.0.0.1:8765');
-      return { host: u.hostname || '127.0.0.1', port: u.port ? parseInt(u.port, 10) : 8765 };
-    } catch {
-      return { host: '127.0.0.1', port: 8765 };
-    }
-  }
-
-  /** 探测某 host:port 是否已被监听（侧车可能已在运行/被别的进程拉起）。 */
+  /** 探测某 host:port 是否已被监听（本地 ASR 侧车/音频桥可能已在运行）。 */
   private portInUse(host: string, port: number): Promise<boolean> {
     return new Promise((resolve) => {
       const sock = createConnection({ host, port });
@@ -2409,108 +2391,6 @@ export class QQWorld implements World {
       sock.once('error', () => finish(false));
       sock.setTimeout(1000, () => finish(false));
     });
-  }
-
-  /** 解析侧车依赖路径；缺失（venv/python/权重/ffmpeg）返回 null。不写死任何机器路径：全部由 voxcpmSidecar.* 配置与环境变量决定，仅在未配置时按"扩展目录向上回溯到 qq_bot/Fat-Fish/feiyu_standalone"这一常见目录布局做相对探测。 */
-  private resolveSidecar(): { python: string; script: string; modelDir: string; ffmpeg: string; logFile: string } | null {
-    const cfg = this.config.voxcpmSidecar;
-    let script = (cfg.script || '').trim();
-    if (!script) {
-      // 相对探测：把扩展目录向上回溯 4 级（extensions/{node_modules,packages}/<扩展包> → 工作区根），再按常见布局找脚本
-      const candidates = [
-        join(this.packageDir, '..', '..', '..', '..', 'qq_bot', 'vox_tts_server.py'),
-        join(this.packageDir, '..', '..', '..', '..', 'Fat-Fish', 'libs', 'qq_bot_runtime', 'vox_tts_server.py'),
-        join(this.packageDir, '..', '..', '..', '..', 'feiyu_standalone', 'libs', 'qq_bot_runtime', 'vox_tts_server.py'),
-      ];
-      script = candidates.find((c) => existsSync(c)) || '';
-    }
-    if (!script || !existsSync(script)) {
-      this.log.warn('[voxcpm-sidecar] 未找到 vox_tts_server.py，请在 worlds.qqbot.voxcpmSidecar.script 配置绝对路径');
-      return null;
-    }
-    const scriptDir = dirname(script);
-    // 解释器优先级：显式 python > 显式 venv 推导 > 脚本目录/上级目录下的 venv_vox/venv
-    let python = (cfg.python || '').trim();
-    if (!python && cfg.venv && cfg.venv.trim()) {
-      python = join(cfg.venv.trim(), 'Scripts', 'python.exe');
-    }
-    if (!python) {
-      const venvCands = [
-        join(scriptDir, 'venv_vox', 'Scripts', 'python.exe'),
-        join(scriptDir, 'venv', 'Scripts', 'python.exe'),
-        join(scriptDir, '..', 'venv_vox', 'Scripts', 'python.exe'),
-        join(scriptDir, '..', '..', 'venv_vox', 'Scripts', 'python.exe'),
-      ];
-      python = venvCands.find((c) => existsSync(c)) || join(scriptDir, 'venv_vox', 'Scripts', 'python.exe');
-    }
-    if (!existsSync(python)) {
-      this.log.warn('[voxcpm-sidecar] 未找到 python 解释器：' + python + '（可在 worlds.qqbot.voxcpmSidecar.venv / .python 指定）');
-      return null;
-    }
-    // 权重目录：显式 > 环境变量 VOXCPM_MODEL_DIR > 脚本目录 models/VoxCPM2（不写死任何机器路径）
-    let modelDir = (cfg.modelDir || '').trim();
-    if (!modelDir) {
-      const mdCands = [
-        process.env.VOXCPM_MODEL_DIR || '',
-        join(scriptDir, 'models', 'VoxCPM2'),
-      ];
-      modelDir = mdCands.find((c) => c && existsSync(join(c, 'model.safetensors'))) || '';
-    }
-    if (!modelDir || !existsSync(join(modelDir, 'model.safetensors'))) {
-      this.log.warn('[voxcpm-sidecar] 未找到 VoxCPM 权重 model.safetensors：' + modelDir + '（可在 worlds.qqbot.voxcpmSidecar.modelDir 指定，或设置环境变量 VOXCPM_MODEL_DIR）');
-      return null;
-    }
-    // ffmpeg：显式配置优先；未配置则留空，由 vox_tts_server.py 自行在 PATH 中探测 ffmpeg（不写死具体路径/版本）
-    let ffmpeg = (cfg.ffmpeg || '').trim();
-    if (!ffmpeg) {
-      ffmpeg = '';
-    }
-    const logFile = (cfg.logFile || '').trim() || join(scriptDir, 'vox_tts_server.log');
-    return { python, script, modelDir, ffmpeg, logFile };
-  }
-
-  /** 拉起 voxcpm 侧车子进程（若启用且端口未被占用/尚未运行）。返回本次是否"新拉起"（用于决定等待时长）。 */
-  private async ensureSidecarLaunched(): Promise<boolean> {
-    const cfg = this.config.voxcpmSidecar;
-    if (!cfg.enabled) return false;
-    if (this.sidecarProc && this.sidecarProc.exitCode === null && this.sidecarProc.signalCode === null) {
-      return false; // 本扩展已拉起且在跑
-    }
-    const { host, port } = this.voxcpmHostPort();
-    if (await this.portInUse(host, port)) {
-      this.log.warn(`[voxcpm-sidecar] 端口 ${port} 已被占用（侧车可能已在运行），跳过拉起`);
-      return false;
-    }
-    const info = this.resolveSidecar();
-    if (!info) {
-      this.log.warn('[voxcpm-sidecar] 依赖不全，跳过自动拉起；如需自动拉起请检查 voxcpmSidecar 配置，或手动启动侧车');
-      return false;
-    }
-    try {
-      const logf = openSync(info.logFile, 'a');
-      const env = { ...process.env } as Record<string, string>;
-      if (info.ffmpeg) env.VOXCPM_FFMPEG = info.ffmpeg;
-      env.VOXCPM_MODEL_DIR = info.modelDir;
-      this.sidecarProc = spawn(info.python, [info.script, String(port), host], {
-        cwd: dirname(info.script),
-        env,
-        stdio: ['ignore', logf, logf],
-        detached: true,
-        windowsHide: true,
-      });
-      this.sidecarLaunchedAt = Date.now();
-      this.sidecarProc.unref();
-      this.sidecarProc.on('exit', (code, sig) => {
-        this.log.warn(`[voxcpm-sidecar] 子进程退出 code=${code} signal=${sig}`);
-        if (this.sidecarProc && this.sidecarProc.exitCode !== null) this.sidecarProc = null;
-      });
-      this.log.warn(`[voxcpm-sidecar] 已拉起 vox_tts_server.py (pid=${this.sidecarProc.pid})，正在加载模型，等待 /health ready…`);
-      return true;
-    } catch (e) {
-      this.log.warn('[voxcpm-sidecar] 拉起失败：' + String(e));
-      this.sidecarProc = null;
-      return false;
-    }
   }
 
   /** 本地 ASR 侧车监听地址（asr.localPort）。 */
@@ -3777,13 +3657,8 @@ export class QQWorld implements World {
       { id: 'voice', title: '语音收发', description: '对方说话转文字、AI 回复转语音。可整体开关，运行时状态见上方。', group: 'world:qqbot-voice', prefix: '', topOnly: false, status: 'getVoiceState' },
       { id: 'asr', title: '语音模型', description: 'ASR 引擎与模型下载：sherpa-onnx int8 量化版约 228MB，省内存更快。', group: 'world:qqbot-asr', prefix: '', topOnly: false, status: 'getAsrModelState', extra: 'asr' },
       { id: 'call', title: '语音通话', description: '触发词进入语音通话会话（模拟接听）。可整体开关。', group: 'world:qqbot-call', prefix: '', topOnly: false, status: 'getCallState' },
-      { id: 'voxcpm', title: 'VoxCPM 侧车', description: 'TTS 侧车子进程（语音合成）。仅当语音引擎选 VoxCPM 时显示，可开关自拉起。', group: 'world:qqbot-voxcpm-sidecar', prefix: '', topOnly: false, status: 'getVoxcpmState' },
     ];
-    // 面板清单按"当前选中的语音引擎"动态决定：VoxCPM 侧车面板只在 TTS 引擎确为 voxcpm 时注册，
-    // 其余引擎（native/custom/local 等）终端用户不看到与本机 VoxCPM 模型无关的侧车界面。
-    const activeModulePanels = modulePanels.filter(
-      (m) => m.id !== 'voxcpm' || this.config.voice.provider === 'voxcpm'
-    );
+    const activeModulePanels = modulePanels;
     const panels: WorldPanelDecl[] = [
       { id: 'roster', title: '监听名单', description: '当前监听的群与私聊及未读情况。', getMethods: ['getRoster'] },
       { id: 'events', title: '实时事件', description: 'QQ 消息与通知的实时流。' },
@@ -3846,7 +3721,7 @@ export class QQWorld implements World {
         ...(this.pet ? this.pet.console(language).promptDocs : []),
       ],
       links: this.pet ? this.pet.console(language).links : [],
-      config: [QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_ASR_GROUP, QQ_CALL_GROUP, QQ_VOXCPM_SIDECAR_GROUP, DESKTOP_PET_CONFIG_GROUP, DESKTOP_PET_ASR_CONFIG_GROUP, DESKTOP_PET_CUA_CONFIG_GROUP, DESKTOP_PET_SOUND_CONFIG_GROUP],
+      config: [QQ_CONFIG_GROUP, QQ_VOICE_GROUP, QQ_ASR_GROUP, QQ_CALL_GROUP, DESKTOP_PET_CONFIG_GROUP, DESKTOP_PET_ASR_CONFIG_GROUP, DESKTOP_PET_CUA_CONFIG_GROUP, DESKTOP_PET_SOUND_CONFIG_GROUP],
     };
   }
 
@@ -3927,7 +3802,6 @@ export class QQWorld implements World {
 
   private async getVoiceState(): Promise<unknown> {
     const v = this.config.voice || {};
-    const cfg = this.config.voxcpmSidecar || {};
     let ttsReady = 'unknown';
     try {
       const r = await fetch((v.voxcpmUrl || 'http://127.0.0.1:8765') + '/health', { signal: AbortSignal.timeout(3000) });
@@ -3943,7 +3817,6 @@ export class QQWorld implements World {
       semanticJudge: !!v.semanticJudge,
       voxcpmUrl: v.voxcpmUrl || 'http://127.0.0.1:8765',
       ttsReady,
-      sidecarAuto: !!cfg.enabled,
     };
   }
 
@@ -3983,29 +3856,6 @@ export class QQWorld implements World {
     };
   }
 
-  private async getVoxcpmState(): Promise<unknown> {
-    const cfg = this.config.voxcpmSidecar || {};
-    const { host, port } = this.voxcpmHostPort();
-    let running = false;
-    try {
-      const r = await fetch(`http://${host}:${port}/health`, { signal: AbortSignal.timeout(3000) });
-      running = r.ok;
-    } catch {
-      running = false;
-    }
-    const info = this.resolveSidecar();
-    return {
-      enabled: !!cfg.enabled,
-      running,
-      pid: this.sidecarProc && this.sidecarProc.exitCode === null ? this.sidecarProc.pid : null,
-      venv: info ? info.python : (cfg.venv || ''),
-      script: info ? info.script : (cfg.script || ''),
-      modelDir: info ? info.modelDir : (cfg.modelDir || ''),
-      url: `http://${host}:${port}`,
-      note: '侧车自拉起为启动时生效；开关保存后若需立即生效请重启 run（POST /api/run/restart）。',
-    };
-  }
-
   /** 各模块 ConfigGroup 的静态映射（按 id 取 schema）。 */
   private configGroupById(id: string): { schema?: { title?: string; properties?: Record<string, any> } } | undefined {
     const map: Record<string, any> = {
@@ -4013,7 +3863,6 @@ export class QQWorld implements World {
       'world:qqbot-voice': QQ_VOICE_GROUP,
       'world:qqbot-call': QQ_CALL_GROUP,
       'world:qqbot-asr': QQ_ASR_GROUP,
-      'world:qqbot-voxcpm-sidecar': QQ_VOXCPM_SIDECAR_GROUP,
     };
     return map[id];
   }
@@ -4080,9 +3929,6 @@ export class QQWorld implements World {
     }
     if (panel === 'call') {
       if (method === 'getCallState') return this.getCallState();
-    }
-    if (panel === 'voxcpm') {
-      if (method === 'getVoxcpmState') return this.getVoxcpmState();
     }
     if (method === 'config') {
       const groupId = typeof args[0] === 'string' ? args[0] : '';

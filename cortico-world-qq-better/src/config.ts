@@ -256,25 +256,6 @@ export interface QQWorldConfig {
   /** 语音识别（ASR）共享配置：语音收发（收语音）与语音通话（听写）共用同一套 ASR，避免重复配置。
    *  默认 local + funasr（SenseVoiceSmall，中文更准，自动从 ModelScope 下载）；后续可切 228MB 的 sherpa-onnx 版（更省内存）。 */
   asr: QQAsrConfig;
-  /** VoxCPM 侧车自拉起：provider=voxcpm 且本机没有常驻 vox_tts_server.py 时，由本扩展负责拉起独立 venv_vox 子进程。与 fat-fish 主 bot 的 tts_vox 守护二选一，避免重复抢显存。 */
-  voxcpmSidecar: {
-    /** 是否由本扩展自动拉起 voxcpm 侧车子进程（默认 false；仅在确认没有别的进程管理侧车时开启）。 */
-    enabled: boolean;
-    /** 虚拟环境（venv）目录绝对路径；空=自动探测。指定后从中推导解释器 <venv>/Scripts/python.exe。 */
-    venv: string;
-    /** venv_vox 的 python 解释器绝对路径；空=由 venv 推导，再退化为 <vox_tts_server.py 所在目录>/venv_vox/Scripts/python.exe。 */
-    python: string;
-    /** vox_tts_server.py 绝对路径；本扩展不内置该脚本（来自 fat-fish qq_bot 运行时），请显式指定；空=按"扩展目录向上回溯到 qq_bot / Fat-Fish / feiyu_standalone"这一常见布局相对探测。 */
-    script: string;
-    /** VOXCPM 权重目录（model.safetensors 所在）；空=优先进程环境变量 VOXCPM_MODEL_DIR，否则 <脚本目录>/models/VoxCPM2。 */
-    modelDir: string;
-    /** VOXCPM_FFMPEG 路径；空=不设置（侧车自行找 ffmpeg）。 */
-    ffmpeg: string;
-    /** 侧车 stdout/stderr 日志文件绝对路径；空=<脚本目录>/vox_tts_server.log。 */
-    logFile: string;
-    /** 拉起后等待 /health 变 ready（模型加载完）的最长秒数，首启常需 2~4 分钟，默认 240。 */
-    startupTimeoutSec: number;
-  };
   /** 语音通话（模拟）：基于语音消息的"打电话"会话，支持即时听说与流式语音 */
   call: QQCallConfig;
   /** 群管理员能力：群撤回 / @全体成员 / 发群通知 / 审核进群 / 给予群头衔 / 禁言（及全员禁言）/ 踢出群聊。
@@ -475,17 +456,6 @@ export const QQ_DEFAULTS: QQWorldConfig = {
     voxcpmSpeed: 1.0,
     voxcpmTimesteps: 10,
     voxcpmSeed: 0,
-  },
-  // VoxCPM 侧车自拉起（仅在 provider=voxcpm 且无其它进程管理侧车时开启）
-  voxcpmSidecar: {
-    enabled: false,
-    venv: '',
-    python: '',
-    script: '',
-    modelDir: '',
-    ffmpeg: '',
-    logFile: '',
-    startupTimeoutSec: 240,
   },
   // 语音识别（ASR）共享配置：语音收发（收语音）与语音通话（听写）共用同一套 ASR。默认 local + funasr。
   asr: {
@@ -778,27 +748,6 @@ export const QQ_ASR_GROUP: ConfigGroup = {
   },
 };
 
-/** worlds.qqbot.voxcpmSidecar —— VoxCPM 侧车自拉起（仅在 provider=voxcpm 且无其它进程管理侧车时开启）。 */
-export const QQ_VOXCPM_SIDECAR_GROUP: ConfigGroup = {
-  id: 'world:qqbot-voxcpm-sidecar',
-  owner: 'world:qqbot',
-  schema: {
-    type: 'object',
-    title: 'QQ·VoxCPM 侧车自拉起',
-    description: 'provider=voxcpm 且本机没有常驻 vox_tts_server.py 时，由本扩展负责拉起独立 venv_vox 子进程（与 fat-fish 主 bot 的 tts_vox 守护二选一，避免重复抢显存）。',
-    properties: {
-    'worlds.qqbot.voxcpmSidecar.enabled': { type: 'boolean', title: '自动拉起侧车', 'x-hot': true, description: '是否由本扩展自动拉起 voxcpm 侧车子进程。仅在确认没有别的进程管理侧车时开启，否则会与其它拉起者抢显存/端口。' },
-    'worlds.qqbot.voxcpmSidecar.python': { type: 'string', title: 'Python 解释器', 'x-hot': true, description: 'venv_vox 的 python 解释器绝对路径；留空=由"虚拟环境目录"推导，再退化为 <vox_tts_server.py 所在目录>/venv_vox/Scripts/python.exe。' },
-    'worlds.qqbot.voxcpmSidecar.venv': { type: 'string', title: '虚拟环境目录', 'x-hot': true, description: '虚拟环境（venv）目录绝对路径。指定后从中推导 <venv>/Scripts/python.exe 来拉起侧车；留空则自动探测 <扩展>/venv_vox 或 <扩展>/venv。' },
-    'worlds.qqbot.voxcpmSidecar.script': { type: 'string', title: '侧车脚本', 'x-hot': true, description: 'vox_tts_server.py 绝对路径；本扩展不内置该脚本（来自 fat-fish qq_bot 运行时），请显式指定；留空=按"扩展目录向上回溯到 qq_bot / Fat-Fish / feiyu_standalone"这一常见布局相对探测。' },
-    'worlds.qqbot.voxcpmSidecar.modelDir': { type: 'string', title: '权重目录', 'x-hot': true, description: 'VOXCPM 权重目录（model.safetensors 所在）；留空=优先进程环境变量 VOXCPM_MODEL_DIR，否则 <脚本目录>/models/VoxCPM2。' },
-    'worlds.qqbot.voxcpmSidecar.ffmpeg': { type: 'string', title: 'FFmpeg 路径', 'x-hot': true, description: 'VOXCPM_FFMPEG 路径；留空=不设置（侧车自行找 ffmpeg）。' },
-    'worlds.qqbot.voxcpmSidecar.logFile': { type: 'string', title: '日志文件', 'x-hot': true, description: '侧车 stdout/stderr 日志文件绝对路径；留空=<脚本目录>/vox_tts_server.log。' },
-    'worlds.qqbot.voxcpmSidecar.startupTimeoutSec': { type: 'integer', title: '启动等待(秒)', minimum: 0, maximum: 1800, 'x-hot': true, description: '拉起后等待 /health 变 ready（模型加载完）的最长秒数，首启常需 2~4 分钟，默认 240。' },
-    },
-  },
-};
-
 /**
  * 原地补全缺省值并保持对象身份：让 World 持有的 this.config 就是 ctx.cfg 的同一引用，
  * 这样控制台的 x-hot 配置改动（groups / privates / 发送节奏等）能即时对 World 生效，无需重启。
@@ -992,17 +941,6 @@ export function normalizeConfig(raw: QQConfigSection): QQWorldConfig {
   if (typeof ca.bridgeScript !== 'string') ca.bridgeScript = '';
   if (typeof ca.bridgePython !== 'string') ca.bridgePython = '';
   c.call = call;
-  // voxcpmSidecar 子对象原地合并：先摊平默认，再被用户配置覆盖（模式同 voice/routine）
-  const sc = c.voxcpmSidecar && typeof c.voxcpmSidecar === 'object' ? (c.voxcpmSidecar as Record<string, unknown>) : {};
-  if (typeof sc.enabled !== 'boolean') sc.enabled = QQ_DEFAULTS.voxcpmSidecar.enabled;
-  if (typeof sc.venv !== 'string') sc.venv = QQ_DEFAULTS.voxcpmSidecar.venv;
-  if (typeof sc.python !== 'string') sc.python = QQ_DEFAULTS.voxcpmSidecar.python;
-  if (typeof sc.script !== 'string') sc.script = QQ_DEFAULTS.voxcpmSidecar.script;
-  if (typeof sc.modelDir !== 'string') sc.modelDir = QQ_DEFAULTS.voxcpmSidecar.modelDir;
-  if (typeof sc.ffmpeg !== 'string') sc.ffmpeg = QQ_DEFAULTS.voxcpmSidecar.ffmpeg;
-  if (typeof sc.logFile !== 'string') sc.logFile = QQ_DEFAULTS.voxcpmSidecar.logFile;
-  if (typeof sc.startupTimeoutSec !== 'number' || (sc.startupTimeoutSec as number) < 0) sc.startupTimeoutSec = QQ_DEFAULTS.voxcpmSidecar.startupTimeoutSec;
-  c.voxcpmSidecar = sc as typeof QQ_DEFAULTS.voxcpmSidecar;
   // admin 子对象原地合并：先摊平默认，再被用户配置覆盖（模式同 voice/routine）
   const adm = c.admin && typeof c.admin === 'object' ? (c.admin as Record<string, unknown>) : {};
   Object.assign(adm, { ...QQ_DEFAULTS.admin, ...adm });
