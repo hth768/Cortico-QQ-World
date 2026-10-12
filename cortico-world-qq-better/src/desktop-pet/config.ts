@@ -62,6 +62,8 @@ export type MicMode = 'hold' | 'toggle' | 'always';
 export type AsrEngine = 'funasr' | 'system';
 
 export interface DesktopPetConfigSection extends WorldSection {
+  /** Master switch. When off, the desktop pet world is never loaded (QQ world only). Default false. */
+  enabled: boolean;
   /** Local server for the pet page, the dressing page and the pet window's socket. */
   port: number;
   /** Fallback name for the person at the computer, used only when memory has no calling for them. */
@@ -178,6 +180,7 @@ export const DESKTOP_PET_CONFIG_GROUP: ConfigGroup = {
     type: 'object',
     title: '桌宠',
     properties: {
+      [`${K}.enabled`]: { type: 'boolean', title: '启用桌宠', description: '打开后重启 QQ 世界即加载桌宠（桌面形象 + 电脑操控）。默认关闭。改完需重启世界才能生效。', 'x-hot': false },
       [`${K}.user`]: { type: 'string', title: '默认称呼(兜底)', description: '记忆里读不到对方称呼时的兜底叫法;能读到时就用记忆里的。', 'x-hot': true },
       [`${K}.userRef`]: { type: 'string', title: '记忆里你的 id', description: '电脑前这个人在记忆里的 id/scope(通常是 QQ 号,记忆按 qq:<号> 存 TA 的档案)。填了桌宠就从这里读 TA 的称呼,而不是写死的默认值;留空则用 main 范围记忆并自动问你叫什么。', 'x-hot': true },
       [`${K}.roam`]: { type: 'string', title: '行为模式', enum: ['free', 'calm', 'off'], description: 'free 常走动;calm 多待着;off 只做被要求的动作。', 'x-hot': true },
